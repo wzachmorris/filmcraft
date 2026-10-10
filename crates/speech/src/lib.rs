@@ -8,6 +8,8 @@
 //!   `download`) the verified downloader. Weights are **never** bundled or committed.
 //! - [`whisper`] (feature `whisper`): Whisper inference in pure Rust on candle, with timestamp
 //!   decoding, language detection and word-level timestamps from cross-attention alignment (DTW).
+//! - [`external`] (native only): any command on the machine that writes Whisper-style JSON, named
+//!   by `FILMCRAFT_TRANSCRIBER` (for example `mlx_whisper` on an Apple-silicon GPU).
 //! - [`diarize`]: speaker labelling by clustering per-chunk MFCC statistics (classical, no model).
 //! - [`mel`]: the log-mel front end shared by Whisper and diarization.
 //! - [`vad`]: energy-based tightening of word bounds (keeps pauses out of words).
@@ -17,6 +19,8 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 pub mod diarize;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod external;
 pub mod mel;
 pub mod models;
 pub mod vad;
@@ -34,7 +38,7 @@ pub const TICKS_PER_SAMPLE: i64 = TICKS_PER_SECOND / SAMPLE_RATE as i64;
 
 /// Media time of a 16 kHz sample index.
 pub fn sample_tick(n: i64) -> Tick {
-    Tick(n * TICKS_PER_SAMPLE)
+    Tick(n.saturating_mul(TICKS_PER_SAMPLE))
 }
 
 /// Media time of `s` seconds (rounded to the nearest 16 kHz sample).
@@ -92,6 +96,19 @@ pub trait Transcriber: Send + Sync {
     fn id(&self) -> String;
     /// Transcribe mono 16 kHz `audio`. Word times are relative to the first sample.
     fn transcribe(&self, audio: &[f32], opts: &Options, progress: ProgressFn) -> Result<Transcript, SpeechError>;
+}
+
+/// The external recogniser named by `FILMCRAFT_TRANSCRIBER` ([`external`]), if set; never on the
+/// web, where there are no processes.
+pub fn external_from_env() -> Option<std::sync::Arc<dyn Transcriber>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        external::ExternalTranscriber::from_env().map(|t| std::sync::Arc::new(t) as std::sync::Arc<dyn Transcriber>)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
 }
 
 /// A transcriber that returns a fixed transcript (tests, demos and agents that bring their own

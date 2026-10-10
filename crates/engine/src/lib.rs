@@ -380,7 +380,8 @@ pub struct Session {
     /// Exports run a batch at a time by [`Session::pump_jobs`] (hosts without threads: web).
     pub stepped: Vec<SteppedJob>,
     /// Speech recogniser for `transcript.generate` (None = the Whisper model named by the command,
-    /// feature `whisper`). Hosts and tests install one here.
+    /// feature `whisper`). Hosts and tests install one here; [`Session::new`] installs the external
+    /// command named by `FILMCRAFT_TRANSCRIBER` when that is set (`filmcraft_speech::external`).
     pub transcriber: Option<Arc<dyn filmcraft_speech::Transcriber>>,
     /// The Events panel log: failed commands, job results, auto-save errors, messages.
     pub log: panels::EventLog,
@@ -473,7 +474,7 @@ impl Session {
             export_presets: Default::default(),
             export_queue: Default::default(),
             stepped: Vec::new(),
-            transcriber: None,
+            transcriber: filmcraft_speech::external_from_env(),
             log: Default::default(),
             browser: Default::default(),
             exec_depth: 0,

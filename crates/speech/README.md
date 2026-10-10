@@ -8,6 +8,9 @@ model handling: [docs/transcripts.md](../../docs/transcripts.md).
 - `models`: Whisper model catalogue (pinned revisions, SHA-256, sizes, licences) and, with feature
   `download`, the verified downloader (ureq + rustls + RustCrypto). Weights are never bundled.
 - `whisper` (feature `whisper`): Whisper inference on candle (CPU, pure Rust).
+- `external` (native only): any command on the machine that writes Whisper-style JSON
+  (`mlx_whisper`, OpenAI's `whisper` CLI, …), named by `FILMCRAFT_TRANSCRIBER`. Writes the audio
+  as WAV, runs the command, reads `transcript.json`, then the same VAD and speaker labelling.
 - `mel`, `vad`, `diarize`: log-mel front end, word-bound tightening, MFCC-clustering speaker labels.
 
 Both features are off by default and are never enabled for wasm (`cargo xtask wasm` checks the

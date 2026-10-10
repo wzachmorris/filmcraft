@@ -58,6 +58,38 @@ Without `speech-download`, `transcript.downloadModel` is disabled the same way. 
 still be imported with `transcript.set` and edited with every other command. Hosts and tests can
 install any recogniser in `Session::transcriber`, which enables transcription in any build.
 
+### Your own recogniser (`FILMCRAFT_TRANSCRIBER`)
+
+Any command on the machine that writes Whisper-style JSON can be the recogniser, in every build
+(no feature needed): set `FILMCRAFT_TRANSCRIBER` to its command line before starting FilmCraft or
+`filmcraft-cli`, and `transcript.generate` / Transcribe Sequence run it instead of the built-in
+model. Typical use: a GPU recogniser with a larger model than the CPU catalogue offers.
+
+```sh
+# Apple silicon: mlx-whisper on the GPU with large-v3-turbo
+FILMCRAFT_TRANSCRIBER="mlx_whisper --model mlx-community/whisper-large-v3-turbo" filmcraft
+```
+
+- **Whisper CLI mode** (no placeholders in the value): FilmCraft appends the audio path and
+  `--output-format json --output-dir <dir> --output-name transcript --word-timestamps True
+  --verbose False`, plus `--language <code>` when a language is chosen. These are the flags of
+  `mlx_whisper` and of OpenAI's `whisper` CLI.
+- **Template mode** (any argument contains `{audio}` or `{outdir}`): only `{audio}`, `{outdir}`
+  and `{language}` are substituted; an argument with `{language}` (and a `--flag` right before it)
+  is dropped when no language is chosen. For tools with other flags:
+  `FILMCRAFT_TRANSCRIBER="my-asr --in {audio} --json {outdir}/transcript.json --lang {language}"`.
+
+FilmCraft writes the clip's audio as mono 16 kHz 16-bit WAV in a private temp directory, runs the
+command, reads `<dir>/transcript.json` (else the first `.json` there) and deletes the directory.
+It understands `language` and `segments[].words[].{word|text, start, end, probability}` (seconds);
+a segment without word times gets its text spread evenly over its span. Every number is clamped
+to the audio. The words then go through the same voice-activity tightening and speaker labelling
+as the built-in recogniser, and the transcript's `source` is `<program>:<model>` (for example
+`mlx_whisper:mlx-community/whisper-large-v3-turbo`). Like the built-in recogniser the command runs
+inside the command (the window waits); the Transcribe dialog's cancel kills the process. A
+failure reports the exit code and the tail of the program's stderr. (`filmcraft_speech::external`;
+`Session::new` installs it, so hosts that set `Session::transcriber` themselves still win.)
+
 ### Models
 
 Weights are **never** bundled or committed. They are downloaded on request into
