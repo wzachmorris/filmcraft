@@ -430,6 +430,36 @@ fn style_strip(app: &mut FilmcraftApp, ui: &mut egui::Ui, r: Rect, track_idx: us
         if resp.changed() {
             actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "background": bg})));
         }
+        // Word highlighting: the word being spoken in its own colour (and box).
+        let mut hl = st.highlight;
+        let resp = ui.checkbox(&mut hl, tl!("Word")).on_hover_text(tl!("Colour the word being spoken"));
+        app.auto.add("text.captions.style.highlight", resp.rect, "Highlight spoken word");
+        if resp.changed() {
+            actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "highlight": hl})));
+        }
+        if st.highlight {
+            let mut hc = Color32::from_rgba_unmultiplied(st.highlight_color[0], st.highlight_color[1], st.highlight_color[2], st.highlight_color[3]);
+            let resp = egui::color_picker::color_edit_button_srgba(ui, &mut hc, egui::color_picker::Alpha::Opaque);
+            app.auto.add("text.captions.style.highlightColor", resp.rect, "Highlight colour");
+            if resp.changed() {
+                actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "highlightColor": hc.to_srgba_unmultiplied()})));
+            }
+            let mut hb = st.highlight_box;
+            let resp = ui.checkbox(&mut hb, tl!("Box")).on_hover_text(tl!("Box behind the word being spoken"));
+            app.auto.add("text.captions.style.highlightBox", resp.rect, "Highlight box");
+            if resp.changed() {
+                actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "highlightBox": hb})));
+            }
+            if st.highlight_box {
+                let mut bc =
+                    Color32::from_rgba_unmultiplied(st.highlight_box_color[0], st.highlight_box_color[1], st.highlight_box_color[2], st.highlight_box_color[3]);
+                let resp = egui::color_picker::color_edit_button_srgba(ui, &mut bc, egui::color_picker::Alpha::Opaque);
+                app.auto.add("text.captions.style.highlightBoxColor", resp.rect, "Highlight box colour");
+                if resp.changed() {
+                    actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "highlightBoxColor": bc.to_srgba_unmultiplied()})));
+                }
+            }
+        }
         ui.label(egui::RichText::new(tl!("Align")).size(11.0).color(app.tokens.text_dim));
         for (a, icon_txt, name, tip) in [
             (CaptionAlign::Left, "L", "left", tl!("Align left")),

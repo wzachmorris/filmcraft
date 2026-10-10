@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use filmcraft_project::{Caption, ClipId, ItemId, Sequence, TrackId, Transcript};
+use filmcraft_project::{Caption, CaptionWord, ClipId, ItemId, Sequence, TrackId, Transcript};
 use filmcraft_time::{FrameRate, TICKS_PER_SECOND, Tick, TimeRange};
 
 use crate::EditCtx;
@@ -408,17 +408,28 @@ pub fn caption_blocks(words: &[SeqWord], rules: &CaptionRules, rate: FrameRate) 
 }
 
 /// Caption blocks as captions (ids from `ctx`).
-pub fn blocks_to_captions(blocks: &[CaptionBlock], ctx: &mut EditCtx) -> Vec<Caption> {
+pub fn blocks_to_captions(blocks: &[CaptionBlock], words: &[SeqWord], ctx: &mut EditCtx) -> Vec<Caption> {
     blocks
         .iter()
-        .map(|b| Caption {
-            id: ClipId(ctx.alloc()),
-            start: b.start,
-            duration: b.end - b.start,
-            text: b.text.clone(),
-            speaker: b.speaker.clone(),
-            cue_id: None,
-            settings: String::new(),
+        .map(|b| {
+            let (start, end) = (b.start, b.end);
+            // the words' own times, kept inside the (frame-snapped) caption
+            let timed = words
+                .get(b.words.clone())
+                .unwrap_or(&[])
+                .iter()
+                .map(|w| CaptionWord { text: w.text.clone(), start: w.start.clamp(start, end), end: w.end.clamp(start, end) })
+                .collect();
+            Caption {
+                id: ClipId(ctx.alloc()),
+                start,
+                duration: end - start,
+                text: b.text.clone(),
+                speaker: b.speaker.clone(),
+                cue_id: None,
+                settings: String::new(),
+                words: timed,
+            }
         })
         .collect()
 }

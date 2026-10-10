@@ -4,7 +4,9 @@
 //! [`CaptionStyle`] (size relative to a 1080-line frame, colour, background box, outline,
 //! alignment, anchor and margin; WebVTT `line:N%` and `align:` cue settings override the style)
 //! and rasterises it into a small premultiplied linear-light RGBA [`Overlay`] positioned in the
-//! frame. Renderers composite overlays over the finished picture.
+//! frame. With the style's `highlight`, the word being spoken is drawn in its own colour (and
+//! box), word by word, from the caption's word times. Renderers composite overlays over the
+//! finished picture.
 
 use filmcraft_color::srgb_to_linear;
 use filmcraft_project::{Caption, CaptionAlign, CaptionAnchor, CaptionStyle, CaptionTrack, Sequence};
@@ -104,8 +106,15 @@ fn vtt_overrides(settings: &str) -> (Option<f32>, Option<CaptionAlign>) {
     (line, align)
 }
 
-/// Lay out and rasterise one caption for a `w`×`h` frame.
+/// Lay out and rasterise one caption for a `w`×`h` frame (no word highlighted).
 pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> Option<Overlay> {
+    render_caption_at(c, style, None, w, h)
+}
+
+/// Lay out and rasterise one caption for a `w`×`h` frame at time `t`: with the style's
+/// `highlight`, the word spoken at `t` ([`Caption::active_word`]) is drawn in `highlight_color`
+/// (and over a `highlight_box_color` box with `highlight_box`).
+pub fn render_caption_at(c: &Caption, style: &CaptionStyle, t: Option<Tick>, w: usize, h: usize) -> Option<Overlay> {
     if w == 0 || h == 0 {
         return None;
     }
@@ -122,6 +131,11 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
     if lines.is_empty() {
         return None;
     }
+    // The word to highlight, as an index into the drawn tokens (lines joined, in order).
+    let active: Option<usize> = match (style.highlight, t) {
+        (true, Some(t)) => c.active_word(t),
+        _ => None,
+    };
     let vm = filmcraft_text::fonts::face(filmcraft_text::resolve(&ts.family, &ts.style).face).metrics(px);
     let (asc, desc) = (vm.ascent, vm.descent);
     let lh = px * style.line_spacing.max(0.8);
@@ -158,29 +172,63 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
     let ow = (bx1 - bx0).max(1.0) as usize;
     let oh = (by1 - by0).max(1.0) as usize;
     let mut cover = vec![0.0f32; ow * oh];
+    let mut hcover = vec![0.0f32; ow * oh];
     let mut bg = vec![0.0f32; ow * oh];
-    for (i, line) in lines.iter().enumerate() {
-        let lt = top + lh * i as f32;
-        if style.background && style.background_color[3] > 0 {
-            let (x0, x1) = (xs[i] - pad_x, xs[i] + widths[i] + pad_x);
-            let (y0, y1) = (lt, lt + lh);
-            for y in (y0.floor() as i32).max(oy)..(y1.ceil() as i32).min(oy + oh as i32) {
-                let fy = ((y as f32 + 1.0).min(y1) - (y as f32).max(y0)).clamp(0.0, 1.0);
-                for x in (x0.floor() as i32).max(ox)..(x1.ceil() as i32).min(ox + ow as i32) {
-                    let fx = ((x as f32 + 1.0).min(x1) - (x as f32).max(x0)).clamp(0.0, 1.0);
-                    let j = (y - oy) as usize * ow + (x - ox) as usize;
-                    bg[j] = (bg[j] + fx * fy).min(1.0);
+    let mut hbg = vec![0.0f32; ow * oh];
+    // Add the area coverage of the rectangle `x0..x1` × `y0..y1` to `mask`.
+    let fill_rect = |mask: &mut [f32], x0: f32, x1: f32, y0: f32, y1: f32| {
+        for y in (y0.floor() as i32).max(oy)..(y1.ceil() as i32).min(oy + oh as i32) {
+            let fy = ((y as f32 + 1.0).min(y1) - (y as f32).max(y0)).clamp(0.0, 1.0);
+            for x in (x0.floor() as i32).max(ox)..(x1.ceil() as i32).min(ox + ow as i32) {
+                let fx = ((x as f32 + 1.0).min(x1) - (x as f32).max(x0)).clamp(0.0, 1.0);
+                let j = (y - oy) as usize * ow + (x - ox) as usize;
+                if let Some(m) = mask.get_mut(j) {
+                    *m = (*m + fx * fy).min(1.0);
                 }
             }
         }
+    };
+    let mut token_index = 0usize;
+    for (i, line) in lines.iter().enumerate() {
+        let lt = top + lh * i as f32;
+        if style.background && style.background_color[3] > 0 {
+            fill_rect(&mut bg, xs[i] - pad_x, xs[i] + widths[i] + pad_x, lt, lt + lh);
+        }
         let baseline = lt + (lh - (asc + desc)) / 2.0 + asc;
-        let l = layout(line, &ts, &ParagraphStyle::default());
-        let mut m = filmcraft_text::Mask { w: ow, h: oh, a: std::mem::take(&mut cover) };
-        render::draw(&l, &render::at(xs[i], baseline.round()), &mut m, (ox, oy));
-        cover = m.a;
+        let tokens: Vec<&str> = line.split(' ').filter(|t| !t.is_empty()).collect();
+        let active_here = active.and_then(|a| a.checked_sub(token_index)).filter(|k| *k < tokens.len());
+        token_index += tokens.len();
+        match active_here {
+            None => {
+                let l = layout(line, &ts, &ParagraphStyle::default());
+                let mut m = filmcraft_text::Mask { w: ow, h: oh, a: std::mem::take(&mut cover) };
+                render::draw(&l, &render::at(xs[i], baseline.round()), &mut m, (ox, oy));
+                cover = m.a;
+            }
+            Some(k) => {
+                // Draw the line word by word so the active word gets its own mask. A word's x is the
+                // width of the line up to and including it, less its own width.
+                for (j, tok) in tokens.iter().enumerate() {
+                    let upto = tokens.get(..=j).unwrap_or(&[]).join(" ");
+                    let tw = filmcraft_text::measure(tok, &ts);
+                    let x = xs[i] + filmcraft_text::measure(&upto, &ts) - tw;
+                    let l = layout(tok, &ts, &ParagraphStyle::default());
+                    let target = if j == k { &mut hcover } else { &mut cover };
+                    let mut m = filmcraft_text::Mask { w: ow, h: oh, a: std::mem::take(target) };
+                    render::draw(&l, &render::at(x, baseline.round()), &mut m, (ox, oy));
+                    *target = m.a;
+                    if j == k && style.highlight_box && style.highlight_box_color[3] > 0 {
+                        let hp = (px * 0.15).round();
+                        fill_rect(&mut hbg, x - hp, x + tw + hp, lt + px * 0.05, lt + lh - px * 0.05);
+                    }
+                }
+            }
+        }
     }
-    let stroke = if outline > 0.0 { dilate(&cover, ow, oh, outline) } else { Vec::new() };
+    let union: Vec<f32> = cover.iter().zip(&hcover).map(|(a, b)| a.max(*b)).collect();
+    let stroke = if outline > 0.0 { dilate(&union, ow, oh, outline) } else { Vec::new() };
     let (tc, bc, oc) = (lin(style.color), lin(style.background_color), lin(style.outline_color));
+    let (hc, hbc) = (lin(style.highlight_color), lin(style.highlight_box_color));
     let mut out = vec![0.0f32; ow * oh * 4];
     for j in 0..ow * oh {
         let mut p = [0.0f32; 4];
@@ -192,10 +240,12 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
             }
         };
         over(&mut p, bc, bg[j]);
+        over(&mut p, hbc, hbg[j]);
         if !stroke.is_empty() {
             over(&mut p, oc, stroke[j]);
         }
         over(&mut p, tc, cover[j]);
+        over(&mut p, hc, hcover[j]);
         out[j * 4..j * 4 + 4].copy_from_slice(&p);
     }
     Some(Overlay { x: ox, y: oy, w: ow, h: oh, px: out })
@@ -235,7 +285,7 @@ pub fn track_overlay(track: &CaptionTrack, t: Tick, w: usize, h: usize) -> Optio
         return None;
     }
     let c = track.caption_at(t)?;
-    render_caption(c, &track.style, w, h)
+    render_caption_at(c, &track.style, Some(t), w, h)
 }
 
 /// Overlays of every visible caption track of a sequence at `t`, bottom track first.
@@ -249,7 +299,63 @@ mod tests {
     use filmcraft_project::{CaptionFormat, ClipId, TrackId};
 
     fn cap(text: &str) -> Caption {
-        Caption { id: ClipId(1), start: Tick(0), duration: Tick(100), text: text.into(), speaker: None, cue_id: None, settings: String::new() }
+        Caption {
+            id: ClipId(1),
+            start: Tick(0),
+            duration: Tick(100),
+            text: text.into(),
+            speaker: None,
+            cue_id: None,
+            settings: String::new(),
+            words: Vec::new(),
+        }
+    }
+
+    fn count(o: &Overlay, pred: impl Fn(&[f32]) -> bool) -> usize {
+        o.px.chunks(4).filter(|p| pred(p)).count()
+    }
+
+    #[test]
+    fn highlight_colours_only_the_spoken_word() {
+        use filmcraft_project::CaptionWord;
+        let mut c = cap("one two three");
+        c.duration = Tick(300);
+        c.words =
+            (0..3).map(|i| CaptionWord { text: ["one", "two", "three"][i].into(), start: Tick(i as i64 * 100), end: Tick(i as i64 * 100 + 100) }).collect();
+        let st = CaptionStyle { background: false, highlight: true, highlight_color: [255, 0, 0, 255], ..Default::default() };
+        let plain = render_caption_at(&c, &st, None, 1920, 1080).unwrap();
+        assert_eq!(count(&plain, |p| p[0] > 0.9 && p[1] < 0.05 && p[3] > 0.9), 0, "nothing red without a time");
+        let white_all = count(&plain, |p| p[0] > 0.9 && p[1] > 0.9 && p[3] > 0.9);
+        let at_two = render_caption_at(&c, &st, Some(Tick(150)), 1920, 1080).unwrap();
+        let red = count(&at_two, |p| p[0] > 0.9 && p[1] < 0.05 && p[3] > 0.9);
+        let white = count(&at_two, |p| p[0] > 0.9 && p[1] > 0.9 && p[3] > 0.9);
+        assert!(red > 100, "red {red}");
+        assert!(white > red && white < white_all, "white {white} (all {white_all}), red {red}");
+        // the overlay keeps its place and size; only colours change
+        assert_eq!((at_two.x, at_two.y, at_two.w, at_two.h), (plain.x, plain.y, plain.w, plain.h));
+        // the first word from the caption's start; the last word stays highlighted to the end
+        assert_eq!(c.active_word(Tick(0)), Some(0));
+        assert_eq!(c.active_word(Tick(299)), Some(2));
+        assert_eq!(c.active_word(Tick(300)), None);
+        let off = CaptionStyle { highlight: false, ..st.clone() };
+        assert_eq!(render_caption_at(&c, &off, Some(Tick(150)), 1920, 1080), Some(plain));
+    }
+
+    #[test]
+    fn highlight_box_and_untimed_captions() {
+        // an imported caption has no word times: words are spread evenly over it
+        let c = cap("alpha beta");
+        let st = CaptionStyle { background: false, highlight: true, highlight_box: true, highlight_box_color: [0, 0, 255, 255], ..Default::default() };
+        let o = render_caption_at(&c, &st, Some(Tick(10)), 1280, 720).unwrap();
+        assert!(count(&o, |p| p[2] > 0.9 && p[0] < 0.05 && p[3] > 0.9) > 50, "blue box pixels");
+        assert_eq!(c.active_word(Tick(10)), Some(0));
+        assert_eq!(c.active_word(Tick(60)), Some(1));
+        // multi-line captions: the token index runs across lines
+        let mut m = cap("first line\nsecond line");
+        m.duration = Tick(400);
+        assert_eq!(m.active_word(Tick(350)), Some(3));
+        let o = render_caption_at(&m, &st, Some(Tick(350)), 1280, 720).unwrap();
+        assert!(count(&o, |p| p[2] > 0.9 && p[0] < 0.05 && p[3] > 0.9) > 50);
     }
 
     #[test]

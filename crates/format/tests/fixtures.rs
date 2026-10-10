@@ -259,3 +259,23 @@ fn v10_minimal_loads_with_m3_11_defaults() {
     assert_eq!(again.schema_version, SCHEMA_VERSION);
     assert_eq!(&again.project, p);
 }
+
+/// Schema 15 (before word highlighting): captions have no `words` and the track style has no
+/// `highlight*` fields. They load with empty word times and highlighting off, and save as v16.
+#[test]
+fn v15_captions_load_without_word_times() {
+    let l = decode(&fixture("v15-captions.fcproj")).unwrap();
+    assert_eq!(l.schema_version, 15);
+    assert!(l.migrated());
+    let p = &l.project;
+    let seq = p.sequence(filmcraft_project::ItemId(21)).unwrap();
+    let track = &seq.caption_tracks[0];
+    assert_eq!(track.captions.len(), 2);
+    assert!(track.captions.iter().all(|c| c.words.is_empty()));
+    assert!(!track.style.highlight && !track.style.highlight_box);
+    assert_eq!(track.style.font, "Bebas Neue");
+    let again = decode(&encode(p, true)).unwrap();
+    assert_eq!(again.schema_version, SCHEMA_VERSION);
+    const { assert!(SCHEMA_VERSION >= 16) };
+    assert_eq!(&again.project, p);
+}

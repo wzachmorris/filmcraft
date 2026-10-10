@@ -47,7 +47,7 @@ pub fn add_caption(seq: &mut Sequence, track: TrackId, start: Tick, duration: Ti
         return Err(EditError::TooShort);
     }
     let id = ClipId(ctx.alloc());
-    t.captions.push(Caption { id, start, duration: dur, text: text.to_string(), speaker: None, cue_id: None, settings: String::new() });
+    t.captions.push(Caption { id, start, duration: dur, text: text.to_string(), speaker: None, cue_id: None, settings: String::new(), words: Vec::new() });
     t.sort();
     Ok(id)
 }
@@ -69,6 +69,11 @@ pub fn split_caption(seq: &mut Sequence, id: ClipId, t: Tick, ctx: &mut EditCtx)
     right.duration = c.end() - t;
     right.cue_id = None;
     c.duration = t - c.start;
+    // each half keeps the words spoken in it (both keep the text, as before)
+    right.words.retain(|w| w.start >= t);
+    c.words.retain(|w| w.start < t);
+    c.clamp_words();
+    right.clamp_words();
     tr.captions.push(right);
     tr.sort();
     Ok(new_id)
@@ -111,9 +116,12 @@ pub fn merge_captions(seq: &mut Sequence, ids: &[ClipId]) -> Result<ClipId> {
     let end = tr.captions[last].end();
     let text: Vec<String> = idx.iter().map(|&i| tr.captions[i].text.trim().to_string()).filter(|t| !t.is_empty()).collect();
     let keep = tr.captions[first].id;
+    let all_timed = idx.iter().all(|&i| !tr.captions[i].words.is_empty());
+    let words: Vec<_> = if all_timed { idx.iter().flat_map(|&i| tr.captions[i].words.clone()).collect() } else { Vec::new() };
     let c = &mut tr.captions[first];
     c.duration = end - c.start;
     c.text = text.join("\n");
+    c.words = words;
     tr.captions.drain(first + 1..=last);
     Ok(keep)
 }
@@ -124,6 +132,7 @@ pub fn set_caption(seq: &mut Sequence, id: ClipId, text: Option<&str>, speaker: 
     let c = track_mut(seq, tid)?.caption_mut(id).ok_or(EditError::NoItem(id))?;
     if let Some(t) = text {
         c.text = t.replace("\r\n", "\n");
+        c.retime_words();
     }
     if let Some(s) = speaker {
         c.speaker = s.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
@@ -142,8 +151,13 @@ pub fn set_caption_times(seq: &mut Sequence, id: ClipId, start: Tick, end: Tick,
         return Err(EditError::Other("captions would overlap".into()));
     }
     let c = tr.caption_mut(id).ok_or(EditError::NoItem(id))?;
-    c.start = start;
-    c.duration = end - start;
+    if end - start == c.duration {
+        c.shift(start - c.start);
+    } else {
+        c.start = start;
+        c.duration = end - start;
+        c.clamp_words();
+    }
     tr.sort();
     Ok(())
 }
@@ -169,6 +183,7 @@ pub fn trim_caption(seq: &mut Sequence, id: ClipId, edge: Edge, delta: Tick, ctx
         }
         Edge::Out => c.duration += d,
     }
+    c.clamp_words();
     Ok(d)
 }
 
@@ -208,7 +223,7 @@ pub fn move_captions(seq: &mut Sequence, ids: &[ClipId], delta: Tick) -> Result<
     for tid in tracks {
         let Some(tr) = seq.caption_track_mut(tid) else { continue };
         for c in tr.captions.iter_mut().filter(|c| ids.contains(&c.id)) {
-            c.start += d;
+            c.shift(d);
         }
         tr.sort();
     }
@@ -244,7 +259,7 @@ pub fn delete_captions(seq: &mut Sequence, ids: &[ClipId], ripple: bool) -> Resu
 /// Shift every caption starting at or after `at` by `delta`.
 pub fn shift_from(tr: &mut CaptionTrack, at: Tick, delta: Tick) {
     for c in tr.captions.iter_mut().filter(|c| c.start >= at) {
-        c.start += delta;
+        c.shift(delta);
     }
 }
 
@@ -256,8 +271,12 @@ pub fn insert_gap(tr: &mut CaptionTrack, at: Tick, dur: Tick, ctx: &mut EditCtx)
         right.start = at;
         right.duration = c.end() - at;
         right.cue_id = None;
+        right.words.retain(|w| w.start >= at);
+        right.clamp_words();
         if let Some(l) = tr.caption_mut(c.id) {
             l.duration = at - c.start;
+            l.words.retain(|w| w.start < at);
+            l.clamp_words();
         }
         tr.captions.push(right);
         tr.sort();
@@ -275,7 +294,7 @@ pub fn extract_range(tr: &mut CaptionTrack, range: TimeRange) {
         if e <= a {
             out.push(c);
         } else if s >= b {
-            c.start = s - range.duration;
+            c.shift(-range.duration);
             out.push(c);
         } else {
             // overlaps the range: keep what lies outside it, joined across the closed gap
@@ -284,6 +303,15 @@ pub fn extract_range(tr: &mut CaptionTrack, range: TimeRange) {
             if left + right > Tick::ZERO {
                 c.start = s.min(a);
                 c.duration = left + right;
+                // words in the removed range go; words after it close up
+                c.words.retain(|w| w.start < a || w.start >= b);
+                for w in &mut c.words {
+                    if w.start >= b {
+                        w.start -= range.duration;
+                        w.end -= range.duration;
+                    }
+                }
+                c.clamp_words();
                 out.push(c);
             }
         }
@@ -312,6 +340,7 @@ mod tests {
                 speaker: None,
                 cue_id: None,
                 settings: String::new(),
+                words: Vec::new(),
             });
         }
         seq.caption_tracks.push(tr);

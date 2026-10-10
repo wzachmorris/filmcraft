@@ -12,7 +12,9 @@ version 2; version 1 projects open with no caption tracks).
   font size (pixels at 1080 lines, scaled to the frame), text colour, background box and its colour,
   outline width and colour, alignment (left/centre/right), position (top/middle/bottom) and
   margin (a fraction of the frame height, default 0.08; `captions.setStyle` clamps it to 0–0.45),
-  line spacing.
+  line spacing, and **word highlighting**: with `highlight` on, the word being spoken is drawn in
+  `highlight_color` (default yellow), optionally over a `highlight_box_color` box (`highlight_box`),
+  word by word as the playhead moves, in the Program monitor and burned in on export.
 - **Caption**: in/out in exact `Tick`s, text (lines separated by `\n`; `<i>`, `<b>`, `<u>` kept
   as written), optional speaker, and the WebVTT cue id and cue settings, kept for round trips.
   Captions on a track never overlap.
@@ -49,7 +51,7 @@ Details of each format and the SCC encoder are in [`crates/captions/README.md`](
 | `captions.delete` | Edit ▸ Clear / Ripple Delete with captions selected | `captions`, `ripple` |
 | `captions.select`, `captions.goTo` | click / number button | `captions`, `add` / `caption` |
 | `captions.setTrack` | caption track header (eye, lock) | `track`, `name`, `format`, `language`, `enabled`, `locked`, `syncLock` |
-| `captions.setStyle` | Text panel style strip | `track`, `size`, `color`, `background`, `backgroundColor`, `outline`, `outlineColor`, `align`, `anchor`, `margin`, `lineSpacing`, `reset` |
+| `captions.setStyle` | Text panel style strip | `track`, `font`, `size`, `color`, `background`, `backgroundColor`, `outline`, `outlineColor`, `align`, `anchor`, `margin`, `lineSpacing`, `highlight`, `highlightColor`, `highlightBox`, `highlightBoxColor`, `reset` |
 | `captions.deleteTrack` | | `track` |
 | `captions.import` / `captions.export` | File ▸ Export ▸ Captions… | `path`, `format`, `track`, `dropFrame` |
 | `captions.list` | (query) | `track` — tracks, styles and captions with timecodes (a `track` that names no caption track is an error) |
@@ -65,9 +67,15 @@ also splits captions.
   violet showing their text. Click selects (⌘/⇧ adds), drag moves, edge drag trims, double-click
   opens the Text panel. Automation ids: `timeline.caption.<id>`,
   `timeline.captionTrack.C1[.locked|.enabled]`.
+- **Word times** (`Caption::words`, schema v16): captions made from a transcript
+  (`transcript.createCaptions`) carry each word's time, which drives the highlighting. Editing the
+  text keeps the times when the word count is unchanged, else spreads the new words evenly; split,
+  merge, move, trim and ripple edits carry the words along. Imported captions have no word times and
+  are spread evenly over each caption when highlighted, so the effect works on any track, roughly.
+  Caption exports (SRT, WebVTT, …) ignore the times.
 - **Text panel ▸ Captions**: search, track picker (also creates tracks of each format), add /
   split / merge / delete / export buttons, the list of segments with editable in/out timecodes
-  and text (committed when the field loses focus), and the track style strip (size, colour, box,
+  and text (committed when the field loses focus), and the track style strip (size, colour, box, word highlight,
   alignment, position). Automation ids: `text.tab.Captions`, `text.captions.add|split|merge|delete|export|search|track`,
   `text.captions.<id>.in|out|text|goto|row`, `text.captions.style.*`.
 

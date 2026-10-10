@@ -53,6 +53,7 @@ writing them is `crates/format` (`filmcraft-format`); the engine's `file.*` comm
 | 11 | M3.11 | search bins (`project.search_bins`), Flash Cue markers, Project Settings safe areas, capture format and scratch disks; no-op step |
 | 12 | M10.7 | graphics design data: `TrackItem::graphic` (roll / crawl, responsive time, template link), `EffectInstance::layer` (layer uid, per-character styles, responsive pins), `project.source_graphics`; no-op step |
 | 13 | Multi-stream audio | `MediaInfo::audio_streams` and `TrackItem::audio_stream`; older `audio` objects load as stream zero, missing clip indices default to zero; no-op step |
+| 16 | Word highlighting | `Caption::words` (word times for highlighting) and `CaptionStyle::highlight`, `highlight_color`, `highlight_box`, `highlight_box_color`; no-op step so older builds refuse the file instead of dropping the word times on save |
 
 ### Migrations
 

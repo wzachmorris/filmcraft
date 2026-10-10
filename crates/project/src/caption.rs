@@ -93,6 +93,12 @@ pub struct CaptionStyle {
     /// Text outline width in pixels at 1080 lines (0 = none).
     pub outline: f32,
     pub outline_color: [u8; 4],
+    /// Colour the word being spoken ([`Caption::active_word`]) in `highlight_color`.
+    pub highlight: bool,
+    pub highlight_color: [u8; 4],
+    /// Draw a box in `highlight_box_color` behind the word being spoken (with `highlight`).
+    pub highlight_box: bool,
+    pub highlight_box_color: [u8; 4],
 }
 
 impl Default for CaptionStyle {
@@ -109,8 +115,22 @@ impl Default for CaptionStyle {
             line_spacing: 1.25,
             outline: 0.0,
             outline_color: [0, 0, 0, 255],
+            highlight: false,
+            highlight_color: [255, 214, 0, 255],
+            highlight_box: false,
+            highlight_box_color: [255, 214, 0, 255],
         }
     }
+}
+
+/// One word of a caption with its own time, for word-by-word highlighting (sequence ticks, inside
+/// the caption). Captions made from a transcript carry them; imported captions don't, and are
+/// spread evenly when highlighted ([`Caption::timed_words`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CaptionWord {
+    pub text: String,
+    pub start: Tick,
+    pub end: Tick,
 }
 
 /// One caption block on a caption track.
@@ -131,11 +151,72 @@ pub struct Caption {
     /// WebVTT cue settings (`line:90% align:start`…), kept verbatim.
     #[serde(default)]
     pub settings: String,
+    /// Word times for highlighting, in order (empty = none known; see [`Caption::timed_words`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<CaptionWord>,
 }
 
 impl Caption {
     pub fn end(&self) -> Tick {
         self.start + self.duration
+    }
+    /// The drawn words (whitespace-separated tokens of the plain text, in order).
+    pub fn tokens(&self) -> Vec<String> {
+        plain_text(&self.text).split_whitespace().map(str::to_string).collect()
+    }
+    /// The caption's words with times: the stored ones when they match the drawn words one for
+    /// one, else the drawn words spread evenly over the caption. Empty for an empty caption.
+    pub fn timed_words(&self) -> Vec<CaptionWord> {
+        let tokens = self.tokens();
+        if tokens.is_empty() {
+            return Vec::new();
+        }
+        if self.words.len() == tokens.len() && self.words.iter().zip(&tokens).all(|(w, t)| w.text == *t) {
+            return self.words.clone();
+        }
+        spread(&tokens, self.start, self.end())
+    }
+    /// Index (into [`Caption::timed_words`]) of the word spoken at `t`: the last word that has
+    /// started, once the first has; `None` before the first word or outside the caption.
+    pub fn active_word(&self, t: Tick) -> Option<usize> {
+        if t < self.start || t >= self.end() {
+            return None;
+        }
+        let words = self.timed_words();
+        let n = words.partition_point(|w| w.start <= t);
+        n.checked_sub(1)
+    }
+    /// After the text changed: keep the word times when the word count is unchanged (only the
+    /// spelling changed), else spread the new words evenly; no stored words stay no stored words.
+    pub fn retime_words(&mut self) {
+        if self.words.is_empty() {
+            return;
+        }
+        let tokens = self.tokens();
+        if tokens.len() == self.words.len() {
+            for (w, t) in self.words.iter_mut().zip(tokens) {
+                w.text = t;
+            }
+        } else {
+            self.words = spread(&tokens, self.start, self.end());
+        }
+    }
+    /// Move the caption and its words by `delta`.
+    pub fn shift(&mut self, delta: Tick) {
+        self.start += delta;
+        for w in &mut self.words {
+            w.start += delta;
+            w.end += delta;
+        }
+    }
+    /// Drop stored words that lie outside the caption (after a trim) and clamp the rest.
+    pub fn clamp_words(&mut self) {
+        let (a, b) = (self.start, self.end());
+        self.words.retain(|w| w.end > a && w.start < b);
+        for w in &mut self.words {
+            w.start = w.start.max(a);
+            w.end = w.end.min(b).max(w.start);
+        }
     }
     pub fn range(&self) -> TimeRange {
         TimeRange::new(self.start, self.duration)
@@ -144,6 +225,25 @@ impl Caption {
     pub fn plain_lines(&self) -> Vec<String> {
         plain_text(&self.text).lines().map(str::to_string).collect()
     }
+}
+
+/// `tokens` spread evenly over `start..end` (`end <= start` gives zero-length words at `start`).
+pub fn spread(tokens: &[String], start: Tick, end: Tick) -> Vec<CaptionWord> {
+    let n = tokens.len() as i64;
+    if n == 0 {
+        return Vec::new();
+    }
+    let span = (end.0.saturating_sub(start.0)).max(0);
+    let step = span / n;
+    tokens
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let a = start.0.saturating_add(step.saturating_mul(i as i64));
+            let b = if i as i64 == n - 1 { start.0.saturating_add(span) } else { a.saturating_add(step) };
+            CaptionWord { text: t.clone(), start: Tick(a), end: Tick(b) }
+        })
+        .collect()
 }
 
 /// A caption track (shown in the caption area above the video tracks).
@@ -312,6 +412,7 @@ mod tests {
                 speaker: None,
                 cue_id: None,
                 settings: String::new(),
+                words: Vec::new(),
             });
         }
         assert_eq!(t.caption_at(Tick(120)).unwrap().text, "c1");
@@ -333,6 +434,7 @@ mod tests {
                 speaker: None,
                 cue_id: None,
                 settings: String::new(),
+                words: Vec::new(),
             });
         }
         let result = std::panic::catch_unwind(|| track.check());
