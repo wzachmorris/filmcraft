@@ -893,9 +893,6 @@ fn run(app: &mut FilmcraftApp, d: &ClipDialogDraft) -> Result<Option<String>, St
             if cmd == "markers.addFlashCue" && q["name"].as_str().is_some_and(str::is_empty) {
                 q.as_object_mut().map(|m| m.remove("name"));
             }
-            if cmd == "sequence.transcribe" && q["language"] == "auto" {
-                q.as_object_mut().map(|m| m.remove("language"));
-            }
             s.execute(cmd, q).map_err(|e| e.to_string())?;
             Ok(None)
         }

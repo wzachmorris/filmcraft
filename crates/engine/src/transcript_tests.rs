@@ -235,6 +235,52 @@ fn captions_for_the_selected_clips_replace_only_that_stretch() {
     s.execute("captions.setTrack", json!({"track": "C1", "locked": false})).unwrap();
 }
 
+/// A recogniser that notes the language it was asked for.
+struct Recording(std::sync::Mutex<Vec<Option<String>>>);
+
+impl filmcraft_speech::Transcriber for Recording {
+    fn id(&self) -> String {
+        "rec".into()
+    }
+    fn transcribe(
+        &self,
+        _: &[f32],
+        o: &filmcraft_speech::Options,
+        _: filmcraft_speech::ProgressFn,
+    ) -> std::result::Result<Transcript, filmcraft_speech::SpeechError> {
+        if let Ok(mut v) = self.0.lock() {
+            v.push(o.language.clone());
+        }
+        Ok(Transcript { language: o.language.clone().unwrap_or_else(|| "xx".into()), ..Default::default() })
+    }
+}
+
+/// "auto" in the Transcribe dialog means detect, even when Settings ▸ Media Analysis names a
+/// default language (that default applies only when no language is passed at all). Whisper
+/// asked for English on Spanish speech translates it, which is how this was found.
+#[test]
+fn the_dialogs_auto_beats_the_settings_default_language() {
+    let (mut s, item, _) = session();
+    let rec = Arc::new(Recording(Default::default()));
+    s.transcriber = Some(rec.clone());
+    let mut prefs = s.prefs.clone();
+    prefs.media_analysis.language_auto_detect = false;
+    prefs.media_analysis.default_language = "en".into();
+    s.set_prefs(prefs).unwrap();
+    let asked = |rec: &Recording| rec.0.lock().map(|v| v.clone()).unwrap_or_default();
+    s.execute("transcript.generate", json!({"items": [item.0]})).unwrap();
+    assert_eq!(asked(&rec), vec![Some("en".to_string())], "no language at all: the Settings default");
+    s.execute("transcript.generate", json!({"items": [item.0], "language": "auto"})).unwrap();
+    assert_eq!(asked(&rec).last(), Some(&None), "auto detects");
+    let before = asked(&rec).len();
+    s.execute("sequence.transcribe", json!({"language": "auto", "track": "mix"})).unwrap();
+    let after = asked(&rec);
+    assert!(after.len() > before && after[before..].iter().all(Option::is_none), "the dialog's auto reaches every clip: {after:?}");
+    s.execute("transcript.generate", json!({"items": [item.0], "language": "es"})).unwrap();
+    assert_eq!(asked(&rec).last(), Some(&Some("es".to_string())));
+    assert_eq!(s.project.transcripts[&item].language, "es");
+}
+
 /// Captions fit the track's style by default: a big font gives few words per caption, a small one
 /// many; `maxChars` still overrides.
 #[test]
