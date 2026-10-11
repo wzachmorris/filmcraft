@@ -51,6 +51,9 @@ Both are **optional features**, off by default and never built for the web:
 - `download` (`speech-download` on the engine): HTTPS downloads with rustls + RustCrypto and the
   operating system's certificate verifier.
 
+A finished transcript is announced in the status bar (a toast: words, speakers, language) since
+the dialog closes without a trace.
+
 Without `whisper`, and with no recogniser installed, `transcript.generate` and Transcribe Sequence
 are disabled, with "speech-to-text is not available in this build" as the reason (`describe`,
 `command_list {"enabled_only": true}` and the menus show it); with Automatically transcribe clips

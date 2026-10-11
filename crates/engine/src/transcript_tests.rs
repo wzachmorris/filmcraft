@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::Session;
+use crate::{Event, Session};
 use filmcraft_project::{ItemId, Transcript, Word};
 use filmcraft_speech::FixedTranscriber;
 use filmcraft_time::Tick;
@@ -47,6 +47,10 @@ fn generate_inspect_search_and_rename() {
     assert_eq!(r["items"][0]["words"], 6, "{r}");
     assert_eq!(r["items"][0]["source"], "fixed");
     assert_eq!(s.project.transcripts[&item].words.len(), 6);
+    assert!(
+        s.drain_events().iter().any(|e| matches!(e, Event::Toast { message, error: false } if message.starts_with("Transcribed: 6 words, 2 speakers (en)"))),
+        "the user is told when the transcript lands"
+    );
 
     let r = s.execute("transcript.inspect", json!({})).unwrap();
     assert_eq!(words(&mut s), ["Hello", "um", "world.", "Second", "speaker", "here."]);

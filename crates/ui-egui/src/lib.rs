@@ -1578,7 +1578,11 @@ impl FilmcraftApp {
                     self.ui.dock.activate(PanelKind::Source);
                 }
                 filmcraft_engine::Event::RevealInProject(item) => self.reveal_in_project(item),
-                filmcraft_engine::Event::Toast { message, .. } => self.toast = Some((message, ctx.input(|i| i.time))),
+                filmcraft_engine::Event::Toast { message, .. } => {
+                    // the status bar is the one place every workspace shows
+                    self.ui.status = message.clone();
+                    self.toast = Some((message, ctx.input(|i| i.time)));
+                }
                 filmcraft_engine::Event::ProjectChanged { .. } => {}
             }
         }

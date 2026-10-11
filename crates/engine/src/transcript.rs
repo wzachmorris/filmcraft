@@ -179,12 +179,20 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .map(|(i, t)| json!({"item": i.0, "words": t.words.len(), "speakers": t.speakers.len(), "language": t.language, "source": t.source}))
         .collect();
+    let words: usize = done.iter().map(|(_, t)| t.words.len()).sum();
+    let speakers: usize = done.iter().map(|(_, t)| t.speakers.len()).max().unwrap_or(0);
+    let mut languages: Vec<&str> = done.iter().map(|(_, t)| t.language.as_str()).filter(|l| !l.is_empty()).collect();
+    languages.sort_unstable();
+    languages.dedup();
+    let languages = languages.join(", ");
     s.edit("Transcribe", move |pr, _| {
         for (i, t) in done {
             pr.transcripts.insert(i, Arc::new(t));
         }
         Ok(())
     })?;
+    // the dialog closes without a trace otherwise; the words wait in the Text panel
+    s.toast(format!("Transcribed: {words} words, {speakers} speaker{} ({languages}). See Text ▸ Transcript", if speakers == 1 { "" } else { "s" }));
     Ok(json!({"items": report, "skipped": skipped}))
 }
 
