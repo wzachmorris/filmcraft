@@ -2292,18 +2292,26 @@ fn build() -> Vec<CommandSpec> {
             "Track Select",
             [],
             None,
-            r#"{"time":ticks|"frame":i64|"seconds":f64 (default: playhead),"forward":bool=true,"track":"V1"|id?}"#,
+            r#"{"time":ticks|"frame":i64|"seconds":f64 (default: playhead),"forward":bool=true,"track":"V1"|"C1"|id?}"#,
             has_seq,
             |s, p| {
                 const CMD: &str = "timeline.trackSelect";
                 let t = time_p(s, p, "").unwrap_or(s.playhead());
                 let fwd = bool_p(p, "forward").unwrap_or(true);
-                let only = track_p(s, p, "track", CMD)?;
+                // `track`: a media track ("V1", "A2", id) keeps it to that track's clips, a caption
+                // track ("C1", id) to that track's captions
+                let (only, only_caps) = match p.get("track") {
+                    Some(v) if !v.is_null() => match crate::captions::track_param(s, p) {
+                        Some(c) => (None, Some(c)),
+                        None => (track_p(s, p, "track", CMD)?, None),
+                    },
+                    _ => (None, None),
+                };
                 let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
                 let hit = |start: Tick, end: Tick| if fwd { end > t } else { start < t };
                 let clips: Vec<ClipId> = q
                     .all_tracks()
-                    .filter(|tr| !tr.locked && only.is_none_or(|o| o == tr.id))
+                    .filter(|tr| !tr.locked && only_caps.is_none() && only.is_none_or(|o| o == tr.id))
                     .flat_map(|tr| tr.items.iter())
                     .filter(|i| hit(i.start, i.end()))
                     .map(|i| i.id)
@@ -2311,7 +2319,7 @@ fn build() -> Vec<CommandSpec> {
                 let captions: Vec<ClipId> = q
                     .caption_tracks
                     .iter()
-                    .filter(|tr| !tr.locked && only.is_none_or(|o| o == tr.id))
+                    .filter(|tr| !tr.locked && only.is_none() && only_caps.is_none_or(|o| o == tr.id))
                     .flat_map(|tr| tr.captions.iter())
                     .filter(|c| hit(c.start, c.end()))
                     .map(|c| c.id)

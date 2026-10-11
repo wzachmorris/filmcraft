@@ -62,7 +62,10 @@ the media tracks (a caption across an insert point is split). `Add Edit to All T
 also splits captions. The Track Select tools (A / ⇧A, `timeline.trackSelect`) select captions
 along with clips, so dragging that selection moves both together (`timeline.move` with
 `captions`) and Delete removes both: a caption the moved block lands on is cut back or removed,
-as a clip is in an overwrite.
+as a clip is in an overwrite. The tools work on the caption rows too: a click there takes
+everything from that time on, a Shift-click only that track's captions (`track: "C1"`), and the
+caption row's right-click menu offers Select Captions From Here / Up To Here / All on This Track
+without changing tool. A drag of a caption block then moves every selected caption.
 
 ## Timeline and Text panel
 

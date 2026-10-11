@@ -86,6 +86,27 @@ fn track_select_takes_clips_and_captions_from_a_time_on() {
 }
 
 #[test]
+fn a_caption_track_as_the_track_selects_captions_only() {
+    let mut s = Session::default();
+    let (_, clips, ct) = stage(&mut s, &[0, 20]);
+    let early = caption(&mut s, ct, 2, 2, "early");
+    let mid = caption(&mut s, ct, 20, 2, "mid");
+    let late = caption(&mut s, ct, 23, 2, "late");
+    let t = start_of(&s, clips[1]);
+    s.execute("timeline.trackSelect", json!({"time": t.0, "track": "C1"})).unwrap();
+    assert_eq!(s.state.caption_selection, vec![mid, late]);
+    assert!(s.state.selection.is_empty(), "no clips: {:?}", s.state.selection);
+    s.execute("timeline.trackSelect", json!({"time": t.0, "track": ct.0, "forward": false})).unwrap();
+    assert_eq!(s.state.caption_selection, vec![early]);
+    assert!(s.state.selection.is_empty());
+    // from the very start: every caption on the track
+    s.execute("timeline.trackSelect", json!({"time": 0, "track": "C1"})).unwrap();
+    assert_eq!(s.state.caption_selection, vec![early, mid, late]);
+    let r = s.execute("timeline.trackSelect", json!({"time": t.0, "track": "C7"}));
+    assert!(r.is_err(), "no such track: {r:?}");
+}
+
+#[test]
 fn dragging_a_track_selection_carries_the_captions() {
     let mut s = Session::default();
     let (v1, clips, ct) = stage(&mut s, &[0, 20]);

@@ -1,9 +1,11 @@
 //! Caption track rows of the Timeline: drawn in their own area above the video tracks (Premiere's
 //! layout). Each row has a header (C1…, name, format, output eye, lock) and caption blocks in a
 //! distinct colour showing their text. Click selects (Cmd/Shift adds), dragging the body moves,
-//! dragging an edge trims, double-click opens the Text panel's Captions tab. Every gesture ends in
-//! one `captions.*` command; every element registers an automation id (`timeline.caption.*`,
-//! `timeline.captionTrack.C1.*`).
+//! dragging an edge trims, double-click opens the Text panel's Captions tab. The Track Select
+//! tools work here too: a click takes everything from that time on (or up to it) on every track,
+//! Shift-click only this track's captions; the right-click menu offers the same without the tool.
+//! Every gesture ends in one command (`captions.*`, `timeline.trackSelect`); every element
+//! registers an automation id (`timeline.caption.*`, `timeline.captionTrack.C1.*`).
 
 use egui::{Align2, Color32, CursorIcon, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use filmcraft_project::{CaptionTrack, ClipId, Sequence};
@@ -14,6 +16,7 @@ use super::timeline::Layout;
 use crate::FilmcraftApp;
 use crate::dock::PanelKind;
 use crate::icons::Icon;
+use crate::state::Tool;
 use crate::theme::Tokens;
 
 /// Height of one caption track row.
@@ -182,30 +185,135 @@ pub fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, area:
     let rate = seq.settings.frame_rate;
     let drag = drag_state(&ctx);
     let mut actions: Vec<(String, Value)> = Vec::new();
-    for (tr, row) in seq.caption_tracks.iter().zip(rows(area, seq.caption_tracks.len())) {
+    for (i, (tr, row)) in seq.caption_tracks.iter().zip(rows(area, seq.caption_tracks.len())).enumerate() {
+        let label = format!("C{}", i + 1);
         let lane = Rect::from_min_max(pos2(layout.content.min.x, row.min.y), pos2(layout.content.max.x, row.max.y));
+        // the lane first, so the blocks (registered after it) stay on top
+        interact_lane(app, ui, tr, &label, lane, layout, rate, &mut actions);
         for c in &tr.captions {
             let r = block_rect(c, row, layout, drag).intersect(lane);
             if r.width() <= 0.0 {
                 continue;
             }
-            interact_block(app, ui, tr, c, r, rate, &mut actions);
+            interact_block(app, ui, tr, &label, c, r, layout, rate, &mut actions);
         }
     }
     run(app, ui, actions);
 }
 
+/// The sequence time under `x`, on a frame.
+fn time_at(layout: &Layout, rate: filmcraft_time::FrameRate, x: f32) -> Tick {
+    rate.snap_nearest(layout.tick_at(x).max(Tick::ZERO))
+}
+
+/// `timeline.trackSelect` from `t` on (or up to it): everything on every track, or with
+/// `only_this` the captions of this track alone.
+fn track_select(tr: &CaptionTrack, t: Tick, forward: bool, only_this: bool) -> (String, Value) {
+    let mut p = json!({"time": t.0, "forward": forward});
+    if only_this {
+        p["track"] = json!(tr.id.0);
+    }
+    ("timeline.trackSelect".into(), p)
+}
+
+/// Right-click menu of a caption row (lane or block): select this track's captions from the
+/// clicked time on, up to it, or all of them.
+fn caption_menu(
+    app: &mut FilmcraftApp,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    tr: &CaptionTrack,
+    label: &str,
+    layout: &Layout,
+    rate: filmcraft_time::FrameRate,
+    actions: &mut Vec<(String, Value)>,
+) {
+    let ctx = ui.ctx().clone();
+    // the time right-clicked, remembered while the menu is open
+    let menu_time_id = egui::Id::new(("cap-menu-time", tr.id.0));
+    if resp.secondary_clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        ctx.data_mut(|d| d.insert_temp(menu_time_id, time_at(layout, rate, p.x).0));
+    }
+    resp.context_menu(|ui| {
+        ui.set_min_width(220.0);
+        let t = Tick(ctx.data(|d| d.get_temp::<i64>(menu_time_id)).unwrap_or(app.session.playhead().0));
+        for (key, text, from, forward) in [
+            ("selectFrom", tl!("Select Captions From Here"), t, true),
+            ("selectUpTo", tl!("Select Captions Up To Here"), t, false),
+            ("selectAll", tl!("Select All Captions on This Track"), Tick::ZERO, true),
+        ] {
+            let r = ui.add_enabled(!tr.locked && !tr.captions.is_empty(), egui::Button::new(text));
+            app.auto.add(&format!("timeline.captionTrack.{label}.menu.{key}"), r.rect, text);
+            if r.clicked() {
+                actions.push(track_select(tr, from, forward, true));
+                ui.close();
+            }
+        }
+    });
+}
+
+/// The empty stretch of a caption row: a Track Select click takes everything from there (Shift:
+/// this track's captions); a plain click leaves nothing selected, as empty space elsewhere does.
+#[allow(clippy::too_many_arguments)]
+fn interact_lane(
+    app: &mut FilmcraftApp,
+    ui: &mut egui::Ui,
+    tr: &CaptionTrack,
+    label: &str,
+    lane: Rect,
+    layout: &Layout,
+    rate: filmcraft_time::FrameRate,
+    actions: &mut Vec<(String, Value)>,
+) {
+    let resp = ui.interact(lane, egui::Id::new(("cap-lane", tr.id.0)), Sense::click());
+    app.auto.add(&format!("timeline.captionTrack.{label}.lane"), lane, &tr.name);
+    if resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        let shift = ui.ctx().input(|i| i.modifiers.shift);
+        match app.ui.tool {
+            Tool::TrackSelectForward | Tool::TrackSelectBackward => {
+                actions.push(track_select(tr, time_at(layout, rate, p.x), app.ui.tool == Tool::TrackSelectForward, shift));
+            }
+            _ => {
+                let st = &mut app.session.state;
+                st.selection.clear();
+                st.edit_points.clear();
+                st.transition_selection.clear();
+                st.caption_selection.clear();
+            }
+        }
+    }
+    caption_menu(app, ui, &resp, tr, label, layout, rate, actions);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn interact_block(
     app: &mut FilmcraftApp,
     ui: &mut egui::Ui,
     tr: &CaptionTrack,
+    label: &str,
     c: &filmcraft_project::Caption,
     r: Rect,
+    layout: &Layout,
     rate: filmcraft_time::FrameRate,
     actions: &mut Vec<(String, Value)>,
 ) {
     let ctx = ui.ctx().clone();
     let resp = ui.interact(r, egui::Id::new(("caption-block", c.id.0)), Sense::click_and_drag());
+    caption_menu(app, ui, &resp, tr, label, layout, rate, actions);
+    // the Track Select tools: from this time on (or up to it), Shift for this track's captions only
+    if matches!(app.ui.tool, Tool::TrackSelectForward | Tool::TrackSelectBackward) {
+        if resp.clicked()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let shift = ctx.input(|i| i.modifiers.shift);
+            actions.push(track_select(tr, time_at(layout, rate, p.x), app.ui.tool == Tool::TrackSelectForward, shift));
+        }
+        return;
+    }
     let edge = 5.0f32.min(r.width() / 4.0);
     let gesture_at = |x: f32| {
         if x - r.min.x < edge {
