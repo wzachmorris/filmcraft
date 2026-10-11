@@ -207,3 +207,33 @@ fn journal_costs_the_ui_thread_only_a_handoff() {
     s.shutdown();
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// An auto-save opened as the project keeps auto-saving into the same `Auto-Save` folder under the
+/// original name: no `Auto-Save/Auto-Save/…` nesting, no `<name>-<stamp>-<stamp>` files, and
+/// Browse Auto-Saves still lists the original's copies.
+#[test]
+fn an_opened_auto_save_does_not_nest() {
+    let d = temp_dir("nest");
+    let proj = d.join("film.fcproj").to_string_lossy().to_string();
+    let mut s = demo();
+    start(&mut s, &d);
+    s.execute("file.saveAs", json!({"path": proj})).unwrap();
+    s.execute("sequence.addEdit", json!({"seconds": 1.0})).unwrap();
+    let first = s.execute("file.autoSaveNow", json!({})).unwrap()["path"].as_str().unwrap().to_string();
+    s.shutdown();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mut t = demo();
+    start(&mut t, &d);
+    t.execute("file.open", json!({"path": first})).unwrap();
+    t.execute("sequence.addEdit", json!({"seconds": 2.0})).unwrap();
+    let second = t.execute("file.autoSaveNow", json!({})).unwrap()["path"].as_str().unwrap().to_string();
+    let second = std::path::Path::new(&second);
+    assert_eq!(second.parent(), std::path::Path::new(&first).parent(), "same Auto-Save folder: {second:?}");
+    let name = second.file_name().unwrap().to_string_lossy();
+    assert!(name.starts_with("film-") && name.matches('_').count() == 1, "one stamp, the original's name: {name}");
+    let list = t.execute("file.listAutoSaves", json!({})).unwrap();
+    let files: Vec<&str> = list["files"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(files, vec![second.to_string_lossy().as_ref(), first.as_str()], "the original's copies, newest first");
+    assert!(!d.join("Auto-Save").join("Auto-Save").exists());
+    t.shutdown();
+}

@@ -4,6 +4,11 @@
 //! `<project name>-YYYY-MM-DD_HH-MM-SS.fcproj` (local wall-clock time). After each write the oldest
 //! files of that project beyond the "Maximum Project Versions" limit are deleted. Only files whose
 //! name is exactly `<name>-<timestamp>.fcproj` are ever touched.
+//!
+//! An auto-save is an ordinary project file, so people open them. One opened from the `Auto-Save`
+//! folder keeps auto-saving into that same folder under the original project's name
+//! ([`auto_save_dir`], [`project_stem`]): otherwise every opened copy grew an `Auto-Save` folder
+//! inside the last one and a name one stamp longer each time.
 
 use std::fs;
 use std::io;
@@ -12,9 +17,26 @@ use std::path::{Path, PathBuf};
 /// The folder name used next to a project.
 pub const AUTO_SAVE_DIR: &str = "Auto-Save";
 
-/// `Auto-Save` folder for a project file.
+/// `Auto-Save` folder for a project file: beside it, or the folder itself when the file is an
+/// auto-save that was opened (its folder is already `Auto-Save`).
 pub fn auto_save_dir(project_path: &Path) -> PathBuf {
-    project_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).join(AUTO_SAVE_DIR)
+    let parent = project_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    if parent.file_name().is_some_and(|n| n == AUTO_SAVE_DIR) { parent.to_path_buf() } else { parent.join(AUTO_SAVE_DIR) }
+}
+
+/// The project name an auto-save of this file is named after: the file stem, less the
+/// `-YYYY-MM-DD_HH-MM-SS` stamps an opened auto-save carries (`film-2026-10-11_08-04-25` → `film`).
+pub fn project_stem(project_path: &Path) -> Option<String> {
+    let mut stem = project_path.file_stem()?.to_string_lossy().into_owned();
+    while let Some(at) = stem.len().checked_sub(STAMP_LEN + 1)
+        && let Some(tail) = stem.get(at..)
+        && let Some(stamp) = tail.strip_prefix('-')
+        && is_stamp(stamp)
+        && at > 0
+    {
+        stem.truncate(at);
+    }
+    Some(stem)
 }
 
 /// A file-name-safe version of a project name (path separators and control characters replaced).
@@ -60,9 +82,12 @@ pub fn auto_save_name(name: &str, unix: i64, offset_secs: i32) -> String {
     format!("{}-{}.fcproj", file_stem(name), timestamp(unix, offset_secs))
 }
 
+/// Length of a `YYYY-MM-DD_HH-MM-SS` stamp.
+const STAMP_LEN: usize = 19;
+
 fn is_stamp(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() == 19
+    b.len() == STAMP_LEN
         && b.iter().enumerate().all(|(i, c)| match i {
             4 | 7 | 13 | 16 => *c == b'-',
             10 => *c == b'_',
@@ -128,6 +153,14 @@ mod tests {
         assert_eq!(file_stem("a/b:c"), "a_b_c");
         assert_eq!(file_stem("  "), "Untitled");
         assert_eq!(auto_save_dir(Path::new("/x/y/p.fcproj")), Path::new("/x/y/Auto-Save"));
+        // an opened auto-save saves beside itself under the original name, however often it was reopened
+        assert_eq!(auto_save_dir(Path::new("/x/y/Auto-Save/p-2026-10-11_08-04-25.fcproj")), Path::new("/x/y/Auto-Save"));
+        assert_eq!(project_stem(Path::new("/x/y/Auto-Save/p-2026-10-11_08-04-25.fcproj")).as_deref(), Some("p"));
+        assert_eq!(project_stem(Path::new("p-2026-10-11_08-04-25-2026-10-11_08-21-18-2026-10-11_09-27-55.fcproj")).as_deref(), Some("p"));
+        assert_eq!(project_stem(Path::new("/x/My Film.fcproj")).as_deref(), Some("My Film"));
+        assert_eq!(project_stem(Path::new("/x/2026-10-11_08-04-25.fcproj")).as_deref(), Some("2026-10-11_08-04-25"), "a bare stamp is a name");
+        assert_eq!(project_stem(Path::new("/x/p-2026-10-11_08-04-2x.fcproj")).as_deref(), Some("p-2026-10-11_08-04-2x"), "not a stamp");
+        assert_eq!(project_stem(Path::new("/")), None);
     }
 
     #[test]

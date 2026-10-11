@@ -1007,14 +1007,12 @@ impl Worker {
             // Project Settings ▸ Scratch Disks ▸ Project Auto Save
             Some(p) if scratch.is_some() => {
                 let p = Path::new(p);
-                (
-                    PathBuf::from(scratch.clone().unwrap_or_default()),
-                    p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.project.name.clone()),
-                )
+                (PathBuf::from(scratch.clone().unwrap_or_default()), names::project_stem(p).unwrap_or_else(|| s.project.name.clone()))
             }
+            // an opened auto-save keeps saving beside itself, under the original project's name
             Some(p) => {
                 let p = Path::new(p);
-                (names::auto_save_dir(p), p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.project.name.clone()))
+                (names::auto_save_dir(p), names::project_stem(p).unwrap_or_else(|| s.project.name.clone()))
             }
             None => (self.data_dir.join(names::AUTO_SAVE_DIR), s.project.name.clone()),
         };

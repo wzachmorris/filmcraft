@@ -129,8 +129,10 @@ At each interval, if the project changed since the last auto-save, a copy is wri
 `Auto-Save` folder next to the project as `<name>-YYYY-MM-DD_HH-MM-SS.fcproj` (local time). An
 unsaved project uses `<data dir>/Auto-Save/`. After each write the oldest copies beyond the limit are
 deleted. Only files named exactly `<name>-<timestamp>.fcproj` are ever deleted. An auto-save is an
-ordinary project file: open it with File ▸ Open Project. `file.listAutoSaves` lists them, newest
-first.
+ordinary project file: open it with File ▸ Open Project. One opened from the `Auto-Save` folder
+keeps auto-saving into that same folder under the original name (no `Auto-Save/Auto-Save/…` and no
+`<name>-<stamp>-<stamp>` files), and Browse Auto-Saves lists the original's copies. `file.listAutoSaves`
+lists them, newest first.
 
 Preferences are stored in `<data dir>/preferences.json`. The `prefs.*` commands read and change them.
 
