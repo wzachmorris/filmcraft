@@ -74,7 +74,8 @@ captions were there. The captions are sized to the track's style: as many charac
 one line at that font and size, so a bigger font means fewer words on screen at a time (down to
 one), a smaller one more, and the timing follows the words either way. Dragging or trimming a
 caption block snaps to clip edges, the playhead and markers like a clip does, and the snap line
-across every track stays up for the whole drag.
+across every track stays up for the whole drag. The Razor shows its cut as a line through every
+track and the caption rows wherever it hovers, so cuts on different tracks can be lined up.
 
 ## Timeline and Text panel
 

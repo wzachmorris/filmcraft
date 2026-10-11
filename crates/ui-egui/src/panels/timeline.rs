@@ -1957,14 +1957,18 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
         if let Grab::Edge { track, clip, edge, kind } = g {
             super::trim_monitor::paint_hover_bracket(ui.painter(), seq, layout, track, clip, edge, kind);
         }
-        // razor preview line
-        if tool == Tool::Razor
-            && let Grab::Other(Hit::Clip { track, .. }) = g
-            && let Some(row) = layout.rows.iter().find(|r| r.track == track)
-        {
-            let t = snap(app, seq, layout, rate.snap_nearest(layout.tick_at(p.x)), &[]);
+        // razor preview line: through every track and the caption rows, so cuts made on one
+        // track line up with the others; brighter on the clip the blade is over
+        if tool == Tool::Razor && layout.content.contains(p) {
+            let t = snap(app, seq, layout, rate.snap_nearest(layout.tick_at(p.x).max(Tick::ZERO)), &[]);
             let x = layout.x_of(t);
-            ui.painter().line_segment([pos2(x, row.rect.min.y), pos2(x, row.rect.max.y)], Stroke::new(1.0, Color32::WHITE));
+            let painter = ui.painter();
+            painter.line_segment([pos2(x, layout.content.min.y), pos2(x, layout.content.max.y)], Stroke::new(1.0, Color32::from_white_alpha(160)));
+            if let Grab::Other(Hit::Clip { track, .. }) = g
+                && let Some(row) = layout.rows.iter().find(|r| r.track == track)
+            {
+                painter.line_segment([pos2(x, row.rect.min.y), pos2(x, row.rect.max.y)], Stroke::new(2.0, Color32::WHITE));
+            }
         }
     }
 
