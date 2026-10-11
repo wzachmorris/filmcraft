@@ -88,7 +88,11 @@ to the audio. The words then go through the same voice-activity tightening and s
 as the built-in recogniser, and the transcript's `source` is `<program>:<model>` (for example
 `mlx_whisper:mlx-community/whisper-large-v3-turbo`). Like the built-in recogniser the command runs
 inside the command (the window waits); the Transcribe dialog's cancel kills the process. A
-failure reports the exit code and the tail of the program's stderr. (`filmcraft_speech::external`;
+failure reports the exit code and the tail of the program's stderr, as does a clean exit that
+wrote no transcript (Whisper's CLI skips a file it cannot read, for instance when `ffmpeg` is not
+found). The command runs with the program's own directory, `~/.local/bin`, `/opt/homebrew/bin` and
+`/usr/local/bin` added to `PATH`, so an app started from the Dock or Finder, whose `PATH` is bare,
+still finds `ffmpeg` beside the recogniser. (`filmcraft_speech::external`;
 `Session::new` installs it, so hosts that set `Session::transcriber` themselves still win.)
 
 ### Models

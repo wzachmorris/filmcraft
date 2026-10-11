@@ -28,8 +28,12 @@
 //!
 //! The command runs synchronously inside `transcript.generate`, like the built-in recogniser;
 //! the progress callback is polled while it runs, so cancelling kills the process. The program's
-//! stderr is kept for the error message when it fails. Nothing here is bundled, downloaded or
-//! shipped: the command is the user's own, named by the user.
+//! stderr is kept for the error message when it fails, or when it exits cleanly without writing
+//! a transcript (Whisper's CLI does that when, say, it cannot find `ffmpeg`). An app launched
+//! from the Dock or Finder has a bare `PATH`, so the child gets the program's own directory,
+//! `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` appended to it ([`child_path`]).
+//! Nothing here is bundled, downloaded or shipped: the command is the user's own, named by the
+//! user.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -178,6 +182,7 @@ impl ExternalTranscriber {
         let stderr = std::fs::File::create(&stderr_path)?;
         let mut child = Command::new(&self.program)
             .args(&argv)
+            .env("PATH", child_path(&self.program, std::env::var_os("PATH").as_deref(), std::env::var_os("HOME").as_deref()))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(stderr)
@@ -213,7 +218,15 @@ impl ExternalTranscriber {
         if !progress(0.92, "Reading transcript") {
             return Err(SpeechError::Cancelled);
         }
-        let json_path = find_output(&outdir).ok_or_else(|| SpeechError::Model(format!("`{}` wrote no .json file to {}", self.program, outdir.display())))?;
+        let json_path = find_output(&outdir).ok_or_else(|| {
+            let tail = stderr_tail(&stderr_path);
+            SpeechError::Model(format!(
+                "`{}` wrote no .json file to {}{}",
+                self.program,
+                outdir.display(),
+                if tail.is_empty() { String::new() } else { format!(": {tail}") }
+            ))
+        })?;
         let json = std::fs::read_to_string(&json_path)?;
         let mut t = parse_output(&json, audio.len(), &self.id)?;
         crate::vad::tighten_words(audio, &mut t.words);
@@ -227,6 +240,28 @@ impl ExternalTranscriber {
         progress(1.0, "Done");
         Ok(t)
     }
+}
+
+/// The `PATH` for the child: the current one, then the program's own directory (when it was
+/// named by path), `~/.local/bin` (pipx, uv), `/opt/homebrew/bin` and `/usr/local/bin` (Homebrew's
+/// `ffmpeg`, which Whisper CLIs call to read audio), each once and only when it exists. GUI apps
+/// on macOS start with `/usr/bin:/bin:/usr/sbin:/sbin` and nothing of the user's.
+pub fn child_path(program: &str, current: Option<&std::ffi::OsStr>, home: Option<&std::ffi::OsStr>) -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = current.map(std::env::split_paths).into_iter().flatten().collect();
+    let mut add = |d: PathBuf| {
+        if d.is_dir() && !dirs.contains(&d) {
+            dirs.push(d);
+        }
+    };
+    if let Some(parent) = Path::new(program).parent().filter(|p| !p.as_os_str().is_empty()) {
+        add(parent.to_path_buf());
+    }
+    if let Some(h) = home {
+        add(Path::new(h).join(".local").join("bin"));
+    }
+    add(PathBuf::from("/opt/homebrew/bin"));
+    add(PathBuf::from("/usr/local/bin"));
+    std::env::join_paths(dirs).unwrap_or_else(|_| current.map(|c| c.to_os_string()).unwrap_or_default())
 }
 
 /// A fresh, private directory under the system temp dir.
@@ -543,9 +578,37 @@ mod tests {
         assert!(matches!(err, SpeechError::Model(ref m) if m.contains("exited with 7") && m.contains("model not found")), "{err}");
         let err = ExternalTranscriber::parse("/definitely/not/here").unwrap().transcribe(&[0.0; 1600], &Options::default(), &mut |_, _| true).unwrap_err();
         assert!(matches!(err, SpeechError::Io(_)), "{err}");
-        let tool = script("exit 0");
+        // Whisper's CLI prints the traceback and exits 0 when it skips a file: that tail is the
+        // only clue, so it rides along.
+        let tool = script("echo 'FileNotFoundError: ffmpeg' >&2; exit 0");
         let err = ExternalTranscriber::parse(&tool.to_string_lossy()).unwrap().transcribe(&[0.0; 1600], &Options::default(), &mut |_, _| true).unwrap_err();
-        assert!(matches!(err, SpeechError::Model(ref m) if m.contains("no .json")), "{err}");
+        assert!(matches!(err, SpeechError::Model(ref m) if m.contains("no .json") && m.contains("FileNotFoundError: ffmpeg")), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_child_sees_the_users_tool_directories_on_path() {
+        // A program named by path finds its siblings, and `~/.local/bin` is appended; a bare
+        // GUI PATH stays in front, nothing is listed twice and missing directories are skipped.
+        let home = temp_dir().unwrap();
+        let local = home.join(".local").join("bin");
+        std::fs::create_dir_all(&local).unwrap();
+        let tool = script("exit 0");
+        let tool_dir = tool.parent().unwrap().to_path_buf();
+        let bare = std::ffi::OsString::from("/usr/bin:/bin");
+        let p = child_path(&tool.to_string_lossy(), Some(&bare), Some(home.as_os_str()));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&p).collect();
+        assert_eq!(dirs.first(), Some(&PathBuf::from("/usr/bin")));
+        assert!(dirs.contains(&tool_dir), "{dirs:?}");
+        assert!(dirs.contains(&local), "{dirs:?}");
+        assert!(!dirs.contains(&PathBuf::from("/definitely/not/here")));
+        let again = child_path(&tool.to_string_lossy(), Some(&p), Some(home.as_os_str()));
+        assert_eq!(std::env::split_paths(&again).count(), dirs.len(), "nothing is added twice");
+        // a bare name on PATH adds no program directory; no PATH at all still yields the extras
+        let p = child_path("mlx_whisper", None, Some(home.as_os_str()));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&p).collect();
+        assert!(dirs.contains(&local) && !dirs.iter().any(|d| d.as_os_str().is_empty()), "{dirs:?}");
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[cfg(unix)]
