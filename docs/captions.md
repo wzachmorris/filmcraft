@@ -76,6 +76,8 @@ one), a smaller one more, and the timing follows the words either way. Dragging 
 caption block snaps to clip edges, the playhead and markers like a clip does, and the snap line
 across every track stays up for the whole drag. The Razor shows its cut as a line through every
 track and the caption rows wherever it hovers, so cuts on different tracks can be lined up.
+Export defaults to burning the captions in when the sequence has a caption track that is switched
+on (Export ▸ Captions ▸ Export Options changes it), and a format switch keeps that choice.
 
 ## Timeline and Text panel
 

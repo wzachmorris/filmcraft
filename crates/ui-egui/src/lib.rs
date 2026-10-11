@@ -50,6 +50,7 @@ pub mod scrub;
 pub mod source_playback;
 pub mod state;
 pub mod theme;
+pub mod varispeed;
 pub mod widgets;
 
 use std::collections::HashMap;
@@ -949,7 +950,9 @@ impl FilmcraftApp {
 
     fn start_audio(&mut self) {
         let speed = self.playback.speed;
-        if (speed - 1.0).abs() > 1e-9 {
+        // reverse play is silent; a forward shuttle (L, L again…) plays the mix at that speed
+        // with the pitch following, as Premiere does, so a fast review keeps its sound
+        if speed <= 0.0 || !speed.is_finite() {
             if let Some(a) = self.audio.as_mut() {
                 a.stop();
             }
@@ -963,12 +966,22 @@ impl FilmcraftApp {
         let mix = playback_mix(&self.session, seq_id, sr);
         // the old stream stops before the new mixer resets the underrun counters
         a.stop();
+        let shuttle = (speed - 1.0).abs() > 1e-9;
         // Desktop: mix ahead on a thread so the device callback never waits on decoding.
         #[cfg(not(target_arch = "wasm32"))]
-        let fill = play_ahead::spawn(mix, cursor, sr, a.channels(), self.playback.audio_stats.clone());
+        let fill = {
+            let (ch, stats) = (a.channels(), self.playback.audio_stats.clone());
+            if shuttle {
+                play_ahead::spawn(varispeed::varispeed(mix, speed, cursor), cursor, sr, ch, stats)
+            } else {
+                play_ahead::spawn(mix, cursor, sr, ch, stats)
+            }
+        };
         #[cfg(target_arch = "wasm32")]
         let fill = {
-            let (mut mix, mut cursor) = (mix, cursor);
+            let mut mix: Box<dyn FnMut(i64, &mut [f32], usize) + Send> =
+                if shuttle { Box::new(varispeed::varispeed(mix, speed, cursor)) } else { Box::new(mix) };
+            let mut cursor = cursor;
             Box::new(move |buf: &mut [f32], ch: usize| {
                 mix(cursor, buf, ch);
                 cursor += (buf.len() / ch.max(1)) as i64;

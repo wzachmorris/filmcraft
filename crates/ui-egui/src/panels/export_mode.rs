@@ -150,6 +150,12 @@ fn sync_sequence(app: &mut FilmcraftApp) {
     if app.ui.export.for_sequence != Some(seq.0) || app.ui.export.file_name.is_empty() {
         app.ui.export.file_name = app.session.project.item(seq).map(|i| i.name.clone()).unwrap_or_else(|| "Sequence".into());
         app.ui.export.for_sequence = Some(seq.0);
+        // captions that show in the sequence show in the export, unless the Captions section is
+        // set otherwise
+        let ex = &mut app.ui.export;
+        if !ex.settings.burn_captions && ex.settings.caption_sidecar.is_none() {
+            ex.settings.burn_captions = app.session.active_sequence().is_some_and(|q| q.caption_tracks.iter().any(|t| t.enabled && !t.captions.is_empty()));
+        }
     }
     if app.ui.export.location.is_empty() {
         app.ui.export.location = filmcraft_engine::export_tools::default_export_dir(&app.session).to_string_lossy().to_string();
@@ -453,7 +459,8 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             if let Some(i) = combo(ui, &mut reg, "export.format", ex.settings.format.label(), &labels, ui.available_width() - 4.0) {
                 let f = Format::ALL[i];
                 if f != ex.settings.format {
-                    // a format switch starts from that format's defaults (keeping size / rate / range)
+                    // a format switch starts from that format's defaults (keeping size / rate / range,
+                    // and what to do with the captions: that is about the sequence, not the codec)
                     let keep = ex.settings.clone();
                     ex.settings = ExportSettings {
                         format: f,
@@ -461,6 +468,8 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         frame_rate: keep.frame_rate,
                         effects: keep.effects,
                         metadata: keep.metadata,
+                        burn_captions: keep.burn_captions,
+                        caption_sidecar: keep.caption_sidecar,
                         ..Default::default()
                     };
                 }
