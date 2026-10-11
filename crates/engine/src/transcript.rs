@@ -402,10 +402,20 @@ fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(t)) if t == "top" => s.active_sequence().and_then(|q| q.caption_tracks.first().map(|t| t.id)),
         Some(_) => Some(crate::captions::track_param(s, p).ok_or_else(|| bad(CMD, "no such caption track (`track`)"))?),
     };
+    // `fit` (the default): as many characters per caption as fit on one line of the frame in the
+    // track's style (the default style for a new track), so a bigger font means fewer words per
+    // caption and the timing follows the words; `maxChars` / `lines` override it
+    let fitted: Option<usize> = match bool_p(p, "fit").unwrap_or(true) {
+        true => s.active_sequence().map(|q| {
+            let style = into.and_then(|t| q.caption_track(t)).map(|t| t.style.clone()).unwrap_or_default();
+            filmcraft_captions::burn::chars_per_line(&style, q.settings.width as usize, q.settings.height as usize)
+        }),
+        false => None,
+    };
     let d = CaptionRules::default();
     let rules = CaptionRules {
-        max_chars: u64_p(p, "maxChars").map(|n| n as usize).unwrap_or(d.max_chars),
-        lines: u64_p(p, "lines").map(|n| n as usize).unwrap_or(d.lines),
+        max_chars: u64_p(p, "maxChars").map(|n| n as usize).or(fitted).unwrap_or(d.max_chars),
+        lines: u64_p(p, "lines").map(|n| n as usize).unwrap_or(if fitted.is_some() { 1 } else { d.lines }),
         min_duration: f64_p(p, "minSeconds").map(Tick::from_seconds_f64).unwrap_or(d.min_duration),
         max_duration: f64_p(p, "maxSeconds").map(Tick::from_seconds_f64).unwrap_or(d.max_duration),
         gap_frames: p.get("gapFrames").and_then(Value::as_i64).unwrap_or(d.gap_frames),
@@ -538,7 +548,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "transcript.createCaptions",
             "Create Captions from Transcript…",
             &["Sequence", "Transcript"],
-            r#"{"clips":[id]?,"selection":bool?,"track":id|"C1"|"top"?,"maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?,"format":str?,"name":str?}"#,
+            r#"{"clips":[id]?,"selection":bool?,"track":id|"C1"|"top"?,"fit":bool=true,"maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?,"format":str?,"name":str?}"#,
             has_transcript,
             create_captions,
             true,
@@ -547,7 +557,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "transcript.createCaptionsForSelection",
             "Create Captions for Selected Clips",
             &["Sequence", "Transcript"],
-            r#"{"track":id|"C1"|"top"="top","maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?}"#,
+            r#"{"track":id|"C1"|"top"="top","fit":bool=true,"maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?}"#,
             has_selected_transcript,
             create_captions_for_selection,
             true,

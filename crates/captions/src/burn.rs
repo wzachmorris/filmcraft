@@ -106,6 +106,27 @@ fn vtt_overrides(settings: &str) -> (Option<f32>, Option<CaptionAlign>) {
     (line, align)
 }
 
+/// How many characters of a caption in `style` fit on one line of a `w`×`h` frame. The renderer
+/// wraps at 90% of the frame width, so a caption built to this many characters per line shows on
+/// one line at that size: a bigger font means fewer words per caption, a smaller one more. Never
+/// less than 1; a hostile size or frame gives 1.
+pub fn chars_per_line(style: &CaptionStyle, w: usize, h: usize) -> usize {
+    if w == 0 || h == 0 || !style.size.is_finite() {
+        return 1;
+    }
+    let scale = h as f32 / 1080.0;
+    let px = (style.size * scale).clamp(4.0, 4096.0);
+    let ts = caption_style(&style.font, px);
+    // ordinary running text: what a line of dialogue is made of
+    const SAMPLE: &str = "en un lugar de la mancha vivía un hombre que no quería acordarse de nada";
+    let width = filmcraft_text::measure(SAMPLE, &ts);
+    let n = SAMPLE.chars().count() as f32;
+    if width <= 0.0 || !width.is_finite() {
+        return 1;
+    }
+    ((w as f32 * 0.9) / (width / n)).floor().clamp(1.0, 500.0) as usize
+}
+
 /// Lay out and rasterise one caption for a `w`×`h` frame (no word highlighted).
 pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> Option<Overlay> {
     render_caption_at(c, style, None, w, h)
@@ -295,6 +316,25 @@ pub fn sequence_overlays(seq: &Sequence, t: Tick, w: usize, h: usize) -> Vec<Ove
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chars_per_line_follows_the_font_size_and_never_drops_to_zero() {
+        use filmcraft_project::CaptionStyle;
+        let small = CaptionStyle { size: 24.0, ..Default::default() };
+        let big = CaptionStyle { size: 120.0, ..Default::default() };
+        let (s, b) = (super::chars_per_line(&small, 1920, 1080), super::chars_per_line(&big, 1920, 1080));
+        assert!(s > b && b >= 1, "small {s} big {b}");
+        // a portrait frame holds fewer per line than a landscape one at the same size
+        assert!(super::chars_per_line(&small, 1080, 1920) < s);
+        for st in [
+            CaptionStyle { size: f32::NAN, ..Default::default() },
+            CaptionStyle { size: -5.0, ..Default::default() },
+            CaptionStyle { size: 1.0e9, ..Default::default() },
+        ] {
+            assert!(super::chars_per_line(&st, 1920, 1080) >= 1);
+        }
+        assert_eq!(super::chars_per_line(&small, 0, 1080), 1);
+    }
+
     use super::*;
     use filmcraft_project::{CaptionFormat, ClipId, TrackId};
 

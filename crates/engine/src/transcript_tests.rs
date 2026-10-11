@@ -230,3 +230,28 @@ fn captions_for_the_selected_clips_replace_only_that_stretch() {
     // one undo per step
     s.execute("captions.setTrack", json!({"track": "C1", "locked": false})).unwrap();
 }
+
+/// Captions fit the track's style by default: a big font gives few words per caption, a small one
+/// many; `maxChars` still overrides.
+#[test]
+fn captions_fit_the_tracks_font_size_by_default() {
+    let (mut s, item, _) = session();
+    s.execute("transcript.generate", json!({"items": [item.0]})).unwrap();
+    s.execute("captions.newTrack", json!({"format": "Subtitle"})).unwrap();
+    let count = |s: &mut Session, size: f64| -> (usize, usize) {
+        s.execute("captions.setStyle", json!({"track": "C1", "size": size})).unwrap();
+        s.execute("transcript.createCaptions", json!({"track": "C1"})).unwrap();
+        let q = s.active_sequence().unwrap();
+        let c = &q.caption_tracks[0].captions;
+        (c.len(), c.iter().map(|x| x.text.chars().count()).max().unwrap_or(0))
+    };
+    let (n_big, chars_big) = count(&mut s, 400.0);
+    let (n_small, chars_small) = count(&mut s, 12.0);
+    assert!(n_big > n_small, "a huge font splits the words into more captions: {n_big} vs {n_small}");
+    assert!(chars_big < chars_small, "{chars_big} vs {chars_small}");
+    assert!(s.active_sequence().unwrap().caption_tracks[0].captions.iter().all(|c| !c.text.contains('\n')), "one line each");
+    // an explicit recipe wins over the fit
+    s.execute("captions.newTrack", json!({"format": "Subtitle"})).unwrap();
+    s.execute("transcript.createCaptions", json!({"track": "C1", "maxChars": 32, "lines": 2})).unwrap();
+    assert_eq!(s.active_sequence().unwrap().caption_tracks[0].captions.len(), 2);
+}

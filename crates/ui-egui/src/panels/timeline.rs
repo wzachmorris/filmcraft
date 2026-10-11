@@ -40,8 +40,10 @@ pub struct TlState {
     pub pressed: Option<Pressed>,
     /// Last layout (for hit-testing from the control channel).
     pub layout: Option<Layout>,
-    /// Snap indicator x (screen) this frame.
-    snap_x: Option<f32>,
+    /// Where the last snap landed (screen x): drawn as a line across every track while a drag is
+    /// on, so what a dragged or trimmed edge lines up with can be seen. Cleared when the snap lets
+    /// go or the drag ends.
+    pub(crate) snap_x: Option<f32>,
     pub peaks: Arc<Mutex<HashMap<ItemId, Arc<Vec<(f32, f32)>>>>>,
     peaks_pending: Arc<Mutex<Vec<ItemId>>>,
     /// Nested sequences have waveforms too, of their mix. Unlike media a sequence changes: this is
@@ -521,8 +523,9 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         painter.add(egui::Shape::convex_polygon(head.to_vec(), t.playhead, Stroke::NONE));
         painter.line_segment([pos2(px, tip), pos2(px, content.max.y)], Stroke::new(1.0, t.playhead));
     }
-    // snap indicator
-    if let Some(sx) = app.tl.snap_x.take() {
+    // snap indicator: for as long as a drag (of clips, the playhead, or a caption) holds a snap
+    let dragging = app.tl.drag.is_some() || super::timeline_captions::drag_active(ui.ctx());
+    if let Some(sx) = app.tl.snap_x.filter(|_| dragging) {
         painter.line_segment([pos2(sx, ruler.max.y), pos2(sx, content.max.y)], Stroke::new(1.0, Color32::from_rgb(250, 250, 250)));
         for y in [ruler.max.y, content.max.y] {
             let d = if y == ruler.max.y { 1.0 } else { -1.0 };
@@ -1505,7 +1508,7 @@ fn vertical_scrollbar(ui: &mut egui::Ui, bar: Rect, value: &mut f32, max: f32, i
 }
 
 /// Snap `t` to nearby candidates (edits, playhead, markers, in/out). Returns snapped tick.
-fn snap(app: &mut FilmcraftApp, seq: &Sequence, layout: &Layout, t: Tick, exclude: &[ClipId]) -> Tick {
+pub(crate) fn snap(app: &mut FilmcraftApp, seq: &Sequence, layout: &Layout, t: Tick, exclude: &[ClipId]) -> Tick {
     snap_to(app, seq, layout, t, exclude, true)
 }
 
@@ -1548,7 +1551,10 @@ fn snap_to(app: &mut FilmcraftApp, seq: &Sequence, layout: &Layout, t: Tick, exc
             app.tl.snap_x = Some(layout.x_of(c));
             c
         }
-        None => t,
+        None => {
+            app.tl.snap_x = None;
+            t
+        }
     }
 }
 
@@ -2218,6 +2224,7 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
     if resp.drag_stopped()
         && let Some(d) = app.tl.drag.take()
     {
+        app.tl.snap_x = None;
         let r = match d {
             Drag::Move { clips, offset, track_delta, .. } if offset != Tick::ZERO || track_delta != 0 => {
                 let moves: Vec<Value> = clips

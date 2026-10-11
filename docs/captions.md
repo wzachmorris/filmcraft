@@ -70,7 +70,11 @@ caption blocks under it as well. A drag of a caption block then moves every sele
 Captions for a part of the sequence come from the clips: select them and use Create Captions for
 Selected Clips (clip menu, Sequence ▸ Transcript, or the Text panel's Transcript tab); the words
 heard during those clips land on the top caption track with their word times, replacing whatever
-captions were there.
+captions were there. The captions are sized to the track's style: as many characters as fit on
+one line at that font and size, so a bigger font means fewer words on screen at a time (down to
+one), a smaller one more, and the timing follows the words either way. Dragging or trimming a
+caption block snaps to clip edges, the playhead and markers like a clip does, and the snap line
+across every track stays up for the whole drag.
 
 ## Timeline and Text panel
 

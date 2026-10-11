@@ -46,6 +46,11 @@ fn drag_state(ctx: &egui::Context) -> Option<(u64, u8, i64)> {
     ctx.data(|d| d.get_temp::<(u64, u8, i64)>(drag_id()))
 }
 
+/// Whether a caption block is being dragged or trimmed.
+pub(crate) fn drag_active(ctx: &egui::Context) -> bool {
+    drag_state(ctx).is_some()
+}
+
 fn block_rect(c: &filmcraft_project::Caption, row: Rect, layout: &Layout, drag: Option<(u64, u8, i64)>) -> Rect {
     let (mut s, mut e) = (c.start, c.end());
     if let Some((id, g, d)) = drag.filter(|d| d.0 == c.id.0) {
@@ -195,7 +200,7 @@ pub fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, area:
             if r.width() <= 0.0 {
                 continue;
             }
-            interact_block(app, ui, tr, &label, c, r, layout, rate, &mut actions);
+            interact_block(app, ui, seq, tr, &label, c, r, layout, rate, &mut actions);
         }
     }
     run(app, ui, actions);
@@ -293,6 +298,7 @@ fn interact_lane(
 fn interact_block(
     app: &mut FilmcraftApp,
     ui: &mut egui::Ui,
+    seq: &Sequence,
     tr: &CaptionTrack,
     label: &str,
     c: &filmcraft_project::Caption,
@@ -367,7 +373,18 @@ fn interact_block(
     {
         let x0 = ctx.data(|d| d.get_temp::<f32>(egui::Id::new("caption-drag-origin"))).unwrap_or(p.x);
         let pps = app.ui.timeline.pps;
-        let d = rate.snap_nearest(Tick::from_seconds_f64((p.x - x0) as f64 / pps));
+        let raw = rate.snap_nearest(Tick::from_seconds_f64((p.x - x0) as f64 / pps));
+        // snap the moving edge(s) to the clips, playhead and markers, as a clip drag does
+        let snap = |app: &mut FilmcraftApp, edge: Tick| super::timeline::snap(app, seq, layout, edge + raw, &[]) - edge;
+        let d = match g {
+            0 => {
+                let s1 = snap(app, c.start);
+                if s1 != raw { s1 } else { snap(app, c.end()) }
+            }
+            1 => snap(app, c.start),
+            _ => snap(app, c.end()),
+        };
+        let d = d.max(-c.start);
         ctx.data_mut(|dd| dd.insert_temp(drag_id(), (id, g, d.0)));
     }
     if resp.drag_stopped()
@@ -375,6 +392,7 @@ fn interact_block(
         && id == c.id.0
     {
         ctx.data_mut(|dd| dd.remove::<(u64, u8, i64)>(drag_id()));
+        app.tl.snap_x = None;
         if d != 0 {
             match g {
                 0 => {
