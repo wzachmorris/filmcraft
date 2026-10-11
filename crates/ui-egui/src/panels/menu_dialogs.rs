@@ -87,7 +87,9 @@ fn dialog_command(id: &str) -> Option<&'static str> {
         "clip.sceneEditDetection" => "clip.sceneEditDetection",
         "sequence.normalizeMixTrack" => "sequence.normalizeMixTrack",
         "sequence.simplify" => "sequence.simplify",
-        "sequence.transcribe" => "sequence.transcribe",
+        // Sequence ▸ Transcript ▸ Transcribe… and the Text panel's Transcribe button open the same
+        // dialog as Transcribe Sequence…, so the language is always chosen (not Settings' default)
+        "sequence.transcribe" | "transcript.generate" => "sequence.transcribe",
         "file.saveAsTemplate" => "file.saveAsTemplate",
         "markers.addFlashCue" => "markers.addFlashCue",
         "file.newColorMatte" => "file.newColorMatte",

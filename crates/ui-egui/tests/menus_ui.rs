@@ -305,3 +305,41 @@ fn color_matte_dialog_picks_and_changes_the_color() {
     assert_eq!(d.call("ui.menu.invoke", json!({"id": "project.matteColor"}))["ok"], json!(false));
     assert!(!d.dialog_open());
 }
+
+#[test]
+fn every_transcribe_entry_opens_the_transcribe_dialog() {
+    struct Stub;
+    impl filmcraft_speech::Transcriber for Stub {
+        fn id(&self) -> String {
+            "stub".into()
+        }
+        fn transcribe(
+            &self,
+            _: &[f32],
+            _: &filmcraft_speech::Options,
+            _: filmcraft_speech::ProgressFn,
+        ) -> Result<filmcraft_project::Transcript, filmcraft_speech::SpeechError> {
+            Ok(filmcraft_project::Transcript::default())
+        }
+    }
+    let mut d = Driver::new();
+    d.app().session.transcriber = Some(std::sync::Arc::new(Stub));
+    // Sequence ▸ Transcript ▸ Transcribe… used to run at once with Settings' default language;
+    // it opens the same dialog as Sequence ▸ Transcribe Sequence… now
+    d.menu("transcript.generate");
+    let dialog = d.app().ui.extras.dialog.clone().expect("Transcribe dialog");
+    assert_eq!(dialog.command, "sequence.transcribe");
+    assert_eq!(dialog.params["language"], "auto");
+    d.click("transcribe.cancel");
+    assert!(!d.dialog_open());
+    // the Text panel's empty-state Transcribe button too
+    d.ok("ui.set", json!({"workspace": "Captions and Graphics"}));
+    d.frames(2);
+    d.ok("ui.click", json!({"id": "text.tab.Transcript"}));
+    d.frames(3);
+    d.click("text.transcript.generate");
+    assert_eq!(d.app().ui.extras.dialog.as_ref().map(|x| x.command.as_str()), Some("sequence.transcribe"));
+    d.click("transcribe.cancel");
+    // with explicit items (an agent over the control channel) the command still runs directly
+    assert!(d.app().ui.extras.dialog.is_none());
+}
