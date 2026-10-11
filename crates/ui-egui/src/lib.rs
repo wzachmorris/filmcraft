@@ -951,7 +951,7 @@ impl FilmcraftApp {
     fn start_audio(&mut self) {
         let speed = self.playback.speed;
         // reverse play is silent; a forward shuttle (L, L again…) plays the mix at that speed
-        // with the pitch following, as Premiere does, so a fast review keeps its sound
+        // with the pitch kept, so a fast review stays intelligible
         if speed <= 0.0 || !speed.is_finite() {
             if let Some(a) = self.audio.as_mut() {
                 a.stop();
@@ -972,7 +972,7 @@ impl FilmcraftApp {
         let fill = {
             let (ch, stats) = (a.channels(), self.playback.audio_stats.clone());
             if shuttle {
-                play_ahead::spawn(varispeed::varispeed(mix, speed, cursor), cursor, sr, ch, stats)
+                play_ahead::spawn(varispeed::stretch(mix, speed, cursor, sr), cursor, sr, ch, stats)
             } else {
                 play_ahead::spawn(mix, cursor, sr, ch, stats)
             }
@@ -980,7 +980,7 @@ impl FilmcraftApp {
         #[cfg(target_arch = "wasm32")]
         let fill = {
             let mut mix: Box<dyn FnMut(i64, &mut [f32], usize) + Send> =
-                if shuttle { Box::new(varispeed::varispeed(mix, speed, cursor)) } else { Box::new(mix) };
+                if shuttle { Box::new(varispeed::stretch(mix, speed, cursor, sr)) } else { Box::new(mix) };
             let mut cursor = cursor;
             Box::new(move |buf: &mut [f32], ch: usize| {
                 mix(cursor, buf, ch);

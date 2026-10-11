@@ -45,8 +45,10 @@ marked range; Program keeps its separate loop setting.
 
 Normal forward playback has sound. With Source focused, L plays forward and J backward; pressing
 the same key again doubles the speed up to 8×, K stops, Shuttle Slow Right/Left play at ¼ speed,
-and the left/right frame-step keys step the Source playhead. As in Program, shuttle speeds other
-than normal forward play without sound, and backward playback stops on the first frame. Source
+and the left/right frame-step keys step the Source playhead. Source shuttle speeds other than
+normal forward play without sound (Program's forward shuttle keeps its sound, time-stretched so
+the pitch stays put: `ui_egui::varispeed::stretch`), and backward playback stops on the first
+frame. Source
 sequences are not yet supported and report an explanatory error. A failed audio device leaves
 the picture advancing with a status message; a decoding error stops Source.
 
