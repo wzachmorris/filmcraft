@@ -433,6 +433,22 @@ fn style_strip(app: &mut FilmcraftApp, ui: &mut egui::Ui, r: Rect, track_idx: us
             let c = col.to_srgba_unmultiplied();
             actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "color": c})));
         }
+        // Outline: width in px at 1080 lines (0 = none) and, with one, its colour.
+        ui.label(tl!("Outline"));
+        let mut outline = st.outline;
+        let resp = ui.add(egui::DragValue::new(&mut outline).range(0.0..=20.0).speed(0.1).suffix(" px")).on_hover_text(tl!("Outline width (0 = none)"));
+        app.auto.add("text.captions.style.outline", resp.rect, "Outline width");
+        if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+            actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "outline": outline})));
+        }
+        if st.outline > 0.0 {
+            let mut oc = Color32::from_rgba_unmultiplied(st.outline_color[0], st.outline_color[1], st.outline_color[2], st.outline_color[3]);
+            let resp = egui::color_picker::color_edit_button_srgba(ui, &mut oc, egui::color_picker::Alpha::Opaque);
+            app.auto.add("text.captions.style.outlineColor", resp.rect, "Outline colour");
+            if resp.changed() {
+                actions.push(("captions.setStyle".into(), json!({"track": tr.id.0, "outlineColor": oc.to_srgba_unmultiplied()})));
+            }
+        }
         let mut bg = st.background;
         let resp = ui.checkbox(&mut bg, tl!("Box"));
         app.auto.add("text.captions.style.background", resp.rect, "Background box");

@@ -93,3 +93,35 @@ fn caption_font_picker_sets_the_track_font() {
     d.frames(3);
     assert_eq!(d.font(track), "Noto Serif");
 }
+
+#[test]
+fn the_style_strip_sets_an_outline_and_offers_its_colour() {
+    let mut d = Driver::demo();
+    d.ok("ui.set", json!({"workspace": "Captions and Graphics"}));
+    let track = d.ok("engine.execute", json!({"command": "captions.newTrack", "params": {"format": "Subtitle"}}))["track"].as_u64().unwrap();
+    d.ok("engine.execute", json!({"command": "captions.add", "params": {"track": track, "text": "Hello", "seconds": 1.0}}));
+    d.frames(2);
+    d.ok("ui.click", json!({"id": "text.tab.Captions"}));
+    d.frames(3);
+    let style = |d: &mut Driver| {
+        let r = d.ok("engine.execute", json!({"command": "captions.list", "params": {}}));
+        r["tracks"].as_array().unwrap().iter().find(|t| t["id"] == json!(track)).expect("track")["style"].clone()
+    };
+    assert_eq!(style(&mut d)["outline"], json!(0.0));
+    assert!(d.ids("text.captions.style.outlineColor").is_empty(), "no colour control without an outline");
+    // the outline field is a drag value: a click edits it as text
+    d.ok("ui.click", json!({"id": "text.captions.style.outline"}));
+    d.ok("ui.key", json!({"key": "Cmd+A"}));
+    d.ok("ui.type", json!({"text": "4"}));
+    d.ok("ui.key", json!({"key": "Enter"}));
+    d.frames(3);
+    assert_eq!(style(&mut d)["outline"], json!(4.0));
+    assert!(!d.ids("text.captions.style.outlineColor").is_empty(), "the outline colour appears with an outline");
+    d.ok("ui.click", json!({"id": "text.captions.style.outline"}));
+    d.ok("ui.key", json!({"key": "Cmd+A"}));
+    d.ok("ui.type", json!({"text": "0"}));
+    d.ok("ui.key", json!({"key": "Enter"}));
+    d.frames(3);
+    assert_eq!(style(&mut d)["outline"], json!(0.0));
+    assert!(d.ids("text.captions.style.outlineColor").is_empty());
+}

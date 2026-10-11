@@ -96,7 +96,7 @@ on (Export ▸ Captions ▸ Export Options changes it), and a format switch keep
   Caption exports (SRT, WebVTT, …) ignore the times.
 - **Text panel ▸ Captions**: search, track picker (also creates tracks of each format), add /
   split / merge / delete / export buttons, the list of segments with editable in/out timecodes
-  and text (committed when the field loses focus), and the track style strip (size, colour, box, word highlight,
+  and text (committed when the field loses focus), and the track style strip (size, colour, outline width and colour, box, word highlight,
   alignment, position). Automation ids: `text.tab.Captions`, `text.captions.add|split|merge|delete|export|search|track`,
   `text.captions.<id>.in|out|text|goto|row`, `text.captions.style.*`.
 
