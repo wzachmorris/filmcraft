@@ -953,8 +953,8 @@ impl FilmcraftApp {
 
     fn start_audio(&mut self) {
         let speed = self.playback.speed;
-        // reverse play is silent; a forward shuttle (L, L again…) plays the mix at that speed
-        // with the pitch kept, so a fast review stays intelligible
+        // reverse play is silent; a forward shuttle (L, L again…) plays the mix at that speed,
+        // the pitch kept (Settings ▸ Audio ▸ Maintain pitch while shuttling) or following
         if speed <= 0.0 || !speed.is_finite() {
             if let Some(a) = self.audio.as_mut() {
                 a.stop();
@@ -970,20 +970,28 @@ impl FilmcraftApp {
         // the old stream stops before the new mixer resets the underrun counters
         a.stop();
         let shuttle = (speed - 1.0).abs() > 1e-9;
+        let keep_pitch = self.session.prefs.audio.maintain_pitch_shuttling;
         // Desktop: mix ahead on a thread so the device callback never waits on decoding.
         #[cfg(not(target_arch = "wasm32"))]
         let fill = {
             let (ch, stats) = (a.channels(), self.playback.audio_stats.clone());
-            if shuttle {
+            if shuttle && keep_pitch {
                 play_ahead::spawn(varispeed::stretch(mix, speed, cursor, sr), cursor, sr, ch, stats)
+            } else if shuttle {
+                play_ahead::spawn(varispeed::resample(mix, speed, cursor), cursor, sr, ch, stats)
             } else {
                 play_ahead::spawn(mix, cursor, sr, ch, stats)
             }
         };
         #[cfg(target_arch = "wasm32")]
         let fill = {
-            let mut mix: Box<dyn FnMut(i64, &mut [f32], usize) + Send> =
-                if shuttle { Box::new(varispeed::stretch(mix, speed, cursor, sr)) } else { Box::new(mix) };
+            let mut mix: Box<dyn FnMut(i64, &mut [f32], usize) + Send> = if shuttle && keep_pitch {
+                Box::new(varispeed::stretch(mix, speed, cursor, sr))
+            } else if shuttle {
+                Box::new(varispeed::resample(mix, speed, cursor))
+            } else {
+                Box::new(mix)
+            };
             let mut cursor = cursor;
             Box::new(move |buf: &mut [f32], ch: usize| {
                 mix(cursor, buf, ch);
