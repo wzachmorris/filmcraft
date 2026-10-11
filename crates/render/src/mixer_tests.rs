@@ -871,4 +871,12 @@ fn maintain_audio_pitch_keeps_the_tone_while_the_clip_runs_faster() {
     let a = mix_graph(&p, p.sequence(outer).unwrap(), 10 * 480, 480, &map, None);
     let b = mix_graph(&p, p.sequence(outer).unwrap(), 10 * 480, 480, &map, None);
     assert_eq!(a.channels[0], b.channels[0], "the same block twice is the same sound");
+    // the stream continues whichever thread mixes the next block and however the blocks are cut:
+    // 100 small blocks sound exactly like 10 large ones (a restart per block was audible static)
+    let mut large = Vec::new();
+    for b in 0..10 {
+        large.extend_from_slice(&mix_graph(&p, p.sequence(outer).unwrap(), 48_000 + b * 4800, 4800, &map, None).channels[0]);
+    }
+    let worst = kept.iter().zip(&large).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-4, "block-invariant: worst difference {worst}");
 }

@@ -96,6 +96,11 @@ impl Stretcher {
         (self.out_origin, self.src_origin)
     }
 
+    /// The output position the next [`Stretcher::process`] continues from without a restart.
+    pub fn expect(&self) -> i64 {
+        self.expect
+    }
+
     /// Whether the stream is a plain pass-through (speed exactly 1).
     pub fn is_identity(&self) -> bool {
         (self.speed - 1.0).abs() < 1e-9

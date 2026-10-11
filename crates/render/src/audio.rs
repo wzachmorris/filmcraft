@@ -4,8 +4,9 @@
 //! graph that consumes it is [`crate::mixer`].
 //!
 //! A time stretch carries state from block to block (the grain chain), which this stateless mixer
-//! keeps in a thread-local cache per clip: playback and export each mix on one thread, block after
-//! block, so a clip's stream continues; a seek restarts it where it lands.
+//! keeps in a process-wide cache: a stream per clip and the output position it continues from, so
+//! the next block picks it up whichever thread mixes it (tracks mix in parallel) and however many
+//! readers there are (playback and an export at once each get their own); a seek starts a new one.
 //!
 //! Stereo, mono and adaptive tracks carry two channels. 5.1 tracks carry six (L, R, C, LFE, Ls,
 //! Rs): their clips play the source's first six channels (or the six `source_channels` picked with
@@ -13,8 +14,8 @@
 //! speakers ([`filmcraft_audio_dsp::channels`]). The clip Panner (stereo balance) does not apply to
 //! 5.1 clips, and Channel Volume's left/right levels apply to L and R.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use filmcraft_audio_dsp::channels::{self as chans, Layout, Mixdown};
 use filmcraft_audio_dsp::stretch::Stretcher;
@@ -423,41 +424,49 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32
     out
 }
 
-/// Stretch streams of the clips this thread is mixing, by clip id and sample rate, with when each
-/// was last used.
-type Stretchers = HashMap<(u64, u32), (Stretcher, u64)>;
-/// Streams kept per thread before the least recently used go.
+/// One live stretch stream: which clip (id, sample rate) it is, the stream, and when it was last
+/// used (a counter, for eviction).
+struct StretchEntry {
+    key: (u64, u32),
+    stream: Stretcher,
+    used: u64,
+}
+
+/// Streams kept before the least recently used goes: a few per clip (a reader per playback or
+/// export, and a seek's fresh start beside the old stream until it is evicted).
 const STRETCHERS_KEPT: usize = 64;
 
-thread_local! {
-    static STRETCHERS: RefCell<(Stretchers, u64)> = RefCell::new((HashMap::new(), 0));
+static STRETCHERS: Mutex<(Vec<StretchEntry>, u64)> = Mutex::new((Vec::new(), 0));
+
+fn stretchers() -> MutexGuard<'static, (Vec<StretchEntry>, u64)> {
+    STRETCHERS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The clip's audio for timeline samples `a0 .. a0 + n` time-stretched to its speed with the pitch
-/// kept, continuing this thread's stream for the clip (started afresh at a seek, or when the clip's
-/// speed or placement changed).
+/// kept, continuing the stream that left off at `a0` (whichever thread mixed the last block), else
+/// a new one starting there (a seek, another reader, or a changed speed or placement). The stream
+/// is taken out of the cache while it runs, so parallel readers never share one.
 fn stretched(item: &TrackItem, src: SourceAudio, a0: i64, n: usize, sr: u32, item_s0: i64) -> Option<AudioBuffer> {
     let speed = item.speed.abs();
     let src_origin = item.source_in.to_units_floor(sr as i64);
     let key = (item.id.0, sr);
-    let channels = STRETCHERS.with(|cell| {
-        let mut guard = cell.borrow_mut();
-        let (map, clock) = &mut *guard;
-        *clock = clock.wrapping_add(1);
-        let now = *clock;
-        if map.len() >= STRETCHERS_KEPT
-            && !map.contains_key(&key)
-            && let Some(old) = map.iter().min_by_key(|(_, (_, used))| *used).map(|(k, _)| *k)
-        {
-            map.remove(&old);
-        }
-        let entry = map.entry(key).or_insert_with(|| (Stretcher::new(speed, sr, item_s0, src_origin), now));
-        if (entry.0.speed() - speed).abs() > 1e-9 || entry.0.origins() != (item_s0, src_origin) {
-            entry.0 = Stretcher::new(speed, sr, item_s0, src_origin);
-        }
-        entry.1 = now;
-        entry.0.process(a0, n, |pos, len| src(pos, len).map(|b| b.channels).unwrap_or_default())
-    });
+    let fits = |s: &Stretcher| (s.speed() - speed).abs() < 1e-9 && s.origins() == (item_s0, src_origin);
+    let taken = {
+        let mut guard = stretchers();
+        let (pool, _) = &mut *guard;
+        pool.iter().position(|e| e.key == key && e.stream.expect() == a0 && fits(&e.stream)).map(|i| pool.swap_remove(i).stream)
+    };
+    let mut stream = taken.unwrap_or_else(|| Stretcher::new(speed, sr, item_s0, src_origin));
+    let channels = stream.process(a0, n, |pos, len| src(pos, len).map(|b| b.channels).unwrap_or_default());
+    let mut guard = stretchers();
+    let (pool, clock) = &mut *guard;
+    *clock = clock.wrapping_add(1);
+    pool.push(StretchEntry { key, stream, used: *clock });
+    if pool.len() > STRETCHERS_KEPT
+        && let Some(i) = pool.iter().enumerate().min_by_key(|(_, e)| e.used).map(|(i, _)| i)
+    {
+        pool.swap_remove(i);
+    }
     Some(AudioBuffer { sample_rate: sr, channels })
 }
 
