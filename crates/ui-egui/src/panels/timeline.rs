@@ -2004,15 +2004,12 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                 None
             }
             (Tool::TrackSelectForward | Tool::TrackSelectBackward, Grab::Other(Hit::Clip { track, .. } | Hit::Empty { track })) => {
-                let fwd = tool == Tool::TrackSelectForward;
-                let ids: Vec<u64> = seq
-                    .all_tracks()
-                    .filter(|tr| !mods.shift || tr.id == track)
-                    .flat_map(|tr| tr.items.iter())
-                    .filter(|i| if fwd { i.end() > t } else { i.start < t })
-                    .map(|i| i.id.0)
-                    .collect();
-                let _ = app.session.execute("timeline.select", json!({"clips": ids}));
+                // clips and captions from here on (or up to here) on every track; Shift: this track only
+                let mut p = json!({"time": t.0, "forward": tool == Tool::TrackSelectForward});
+                if mods.shift {
+                    p["track"] = json!(track.0);
+                }
+                let _ = app.session.execute("timeline.trackSelect", p);
                 None
             }
             (Tool::Selection | Tool::Ripple | Tool::Rolling, Grab::Edge { clip, edge, track, .. }) if resp.clicked() => {
@@ -2226,7 +2223,15 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                     .iter()
                     .filter_map(|c| seq.find_item(*c).map(|(tid, it)| json!({"clip": c.0, "track": shift_track(seq, tid, track_delta).unwrap_or(tid).0, "time": (it.start + offset).max(Tick::ZERO).0})))
                     .collect();
-                Some(app.session.execute("timeline.move", json!({"moves": moves, "insert": mods.command, "linked": false})))
+                // captions selected with the clips (Track Select) ride on the same drag
+                let captions: Vec<Value> = app
+                    .session
+                    .state
+                    .caption_selection
+                    .iter()
+                    .filter_map(|c| seq.find_caption(*c).map(|(_, cap)| json!({"caption": c.0, "time": (cap.start + offset).max(Tick::ZERO).0})))
+                    .collect();
+                Some(app.session.execute("timeline.move", json!({"moves": moves, "captions": captions, "insert": mods.command, "linked": false})))
             }
             Drag::Trim { clip, edge, mode, delta, .. } if delta != Tick::ZERO => Some(app.session.execute(
                 "timeline.trim",

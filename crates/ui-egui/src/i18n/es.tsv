@@ -2952,8 +2952,8 @@
 	GPU acceleration is unavailable; preview renders on the CPU	La aceleración por GPU no está disponible; la vista previa se renderiza en la CPU
 	Exporting	Exportando
 	Click to select, or click in empty space and drag to marquee select. Use Shift, Opt, and Cmd for other options.	Haz clic para seleccionar, o haz clic en un espacio vacío y arrastra para seleccionar con un marco. Usa Mayús, Opción y Cmd para otras opciones.
-	Click to select all clips to the right in all tracks. Shift-click for a single track.	Haz clic para seleccionar todos los clips a la derecha en todas las pistas. Mayús+clic para una sola pista.
-	Click to select all clips to the left in all tracks. Shift-click for a single track.	Haz clic para seleccionar todos los clips a la izquierda en todas las pistas. Mayús+clic para una sola pista.
+	Click to select all clips and captions to the right in all tracks. Shift-click for a single track.	Haz clic para seleccionar todos los clips y subtítulos a la derecha en todas las pistas. Mayús+clic para una sola pista.
+	Click to select all clips and captions to the left in all tracks. Shift-click for a single track.	Haz clic para seleccionar todos los clips y subtítulos a la izquierda en todas las pistas. Mayús+clic para una sola pista.
 	Drag an edit point to ripple trim; later clips move to keep the gap closed.	Arrastra un punto de edición para hacer un recorte de rizo; los clips posteriores se mueven para no dejar hueco.
 	Drag an edit point to roll it: the out of one clip and the in of the next move together.	Arrastra un punto de edición para rodarlo: la salida de un clip y la entrada del siguiente se mueven juntas.
 	Drag an edge to change the clip's speed so it fills the new duration.	Arrastra un borde para cambiar la velocidad del clip y que ocupe la nueva duración.

@@ -2935,8 +2935,8 @@
 	Graphics problem: switched to software compositing	图形问题：已切换至软件合成
 	Exporting	正在导出
 	Click to select, or click in empty space and drag to marquee select. Use Shift, Opt, and Cmd for other options.	单击以选择，或在空白处单击并拖动以框选。使用 Shift、Opt 和 Cmd 进行其他操作。
-	Click to select all clips to the right in all tracks. Shift-click for a single track.	单击以选择所有轨道中右侧的剪辑。Shift-单击选择单个轨道。
-	Click to select all clips to the left in all tracks. Shift-click for a single track.	单击以选择所有轨道中左侧的剪辑。Shift-单击选择单个轨道。
+	Click to select all clips and captions to the right in all tracks. Shift-click for a single track.	单击以选择所有轨道中右侧的剪辑和字幕。Shift-单击选择单个轨道。
+	Click to select all clips and captions to the left in all tracks. Shift-click for a single track.	单击以选择所有轨道中左侧的剪辑和字幕。Shift-单击选择单个轨道。
 	Drag an edit point to ripple trim; later clips move to keep the gap closed.	拖动编辑点进行波纹修剪；后续剪辑移动以保持间隙闭合。
 	Drag an edit point to roll it: the out of one clip and the in of the next move together.	拖动编辑点进行滚动修剪：一个剪辑的出点和下一个剪辑的入点一起移动。
 	Drag an edge to change the clip's speed so it fills the new duration.	拖动边缘以更改剪辑速度，使其填满新时长。

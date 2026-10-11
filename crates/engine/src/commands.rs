@@ -315,8 +315,25 @@ fn move_clips(s: &mut Session, p: &Value) -> Result<Value> {
     if listed.is_empty() {
         return Err(bad(CMD, "need `moves`"));
     }
+    // captions dragged with the clips (Track Select): each `time` is where that caption starts
+    // afterwards; they move as one block, so every one must name the same shift
+    let mut caps: Vec<(ClipId, i128)> = Vec::new();
+    for m in p.get("captions").and_then(Value::as_array).into_iter().flatten() {
+        if let (Some(c), Some(time)) = (m.get("caption").and_then(Value::as_u64).map(ClipId), m.get("time").and_then(Value::as_i64)) {
+            caps.push((c, i128::from(time)));
+        }
+    }
     let follow = bool_p(p, "linked").unwrap_or(s.state.linked_selection);
     let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    let mut cap_delta: Option<i128> = None;
+    for (c, time) in &caps {
+        let (_, cap) = q.find_caption(*c).ok_or_else(|| bad(CMD, "no such caption"))?;
+        let d = time - i128::from(cap.start.0);
+        if cap_delta.is_some_and(|x| x != d) {
+            return Err(bad(CMD, "captions move as one block: every `time` must shift by the same amount"));
+        }
+        cap_delta = Some(d);
+    }
     // (clip, destination track, new start, where a partner starts now). `time` is any i64: the
     // sums are done in i128, where a few i64 values cannot overflow, and checked on the way back.
     let mut plan: Vec<(ClipId, TrackId, i128, Option<i128>)> = Vec::new();
@@ -333,7 +350,13 @@ fn move_clips(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
-    let late = plan.iter().map(|m| -m.2).max().unwrap_or(0).max(0);
+    // the whole block, captions included, stops together at the sequence start
+    let late = plan.iter().map(|m| -m.2).chain(caps.iter().map(|c| -c.1)).max().unwrap_or(0).max(0);
+    let cap_ids: Vec<ClipId> = caps.iter().map(|c| c.0).collect();
+    let cap_delta = match cap_delta {
+        Some(d) => Some(i64::try_from(d + late).ok().map(Tick).ok_or_else(|| bad(CMD, "`time` is out of range"))?),
+        None => None,
+    };
     let mut moves: Vec<(ClipId, TrackId, Tick)> = Vec::with_capacity(plan.len());
     for (clip, track, start, was) in plan {
         // a partner that ends up where it is does not move (its listed clip only changed track):
@@ -351,7 +374,15 @@ fn move_clips(s: &mut Session, p: &Value) -> Result<Value> {
         q.into_iter().flat_map(|q| q.all_tracks()).flat_map(|t| t.items.iter().map(move |i| (i.id.0, t.id, i.start, i.end(), i.item))).collect()
     };
     let before = spots(s);
-    s.edit_sequence(if ins { "Move (Insert)" } else { "Move" }, |q, ctx, _| Ok(edit::move_items(q, &moves, ins, ctx)?))?;
+    s.edit_sequence(if ins { "Move (Insert)" } else { "Move" }, |q, ctx, _| {
+        edit::move_items(q, &moves, ins, ctx)?;
+        // the dragged captions land where the clips do; with an insert the sync-locked caption
+        // tracks already follow the inserted span, so they are left to that
+        if let Some(d) = cap_delta.filter(|_| !ins) {
+            edit::captions::move_captions_over(q, &cap_ids, d, ctx)?;
+        }
+        Ok(())
+    })?;
     // An overwrite shortens, splits or removes whatever already sits where a clip lands, and a
     // shortened clip may live on under a new id: name each clip the move changed without being
     // asked to, with what is left of it, so the caller hears about it instead of finding out later.
@@ -369,7 +400,9 @@ fn move_clips(s: &mut Session, p: &Value) -> Result<Value> {
         let now: i64 = pieces.iter().map(|a| (a.3 - a.2).0).sum();
         overwritten.push(json!({"clip": c, "was": (end - start).0, "now": now, "pieces": pieces.iter().map(|a| a.0).collect::<Vec<_>>()}));
     }
-    Ok(json!({"moved": moves.iter().map(|m| m.0.0).collect::<Vec<_>>(), "overwritten": overwritten}))
+    Ok(
+        json!({"moved": moves.iter().map(|m| m.0.0).collect::<Vec<_>>(), "captions": cap_ids.iter().map(|c| c.0).collect::<Vec<_>>(), "overwritten": overwritten}),
+    )
 }
 
 /// Slip clips together: the media delta of each clip is scaled down by the same factor so that the
@@ -1306,8 +1339,14 @@ fn build() -> Vec<CommandSpec> {
                 return crate::captions::delete(s, &caps, false);
             }
             let sel = with_links(s, &clips_p(s, p));
+            // captions selected along with the clips (Track Select) go in the same edit
+            let caps = if p.get("clips").is_none() && p.get("clip").is_none() { s.state.caption_selection.clone() } else { Vec::new() };
             s.edit_sequence("Clear", |q, _, st| {
                 edit::delete_items(q, &sel);
+                if !caps.is_empty() {
+                    edit::captions::delete_captions(q, &caps, false)?;
+                    st.caption_selection.clear();
+                }
                 st.selection.clear();
                 Ok(())
             })?;
@@ -2246,12 +2285,54 @@ fn build() -> Vec<CommandSpec> {
             }
             Ok(json!({"selection": s.state.selection.iter().map(|c| c.0).collect::<Vec<_>>()}))
         }),
+        // the Track Select tools: everything from `time` on (or up to it) on every unlocked track,
+        // captions included, as in Premiere; `track` limits it to one track (Shift-click)
+        cmd!(
+            "timeline.trackSelect",
+            "Track Select",
+            [],
+            None,
+            r#"{"time":ticks|"frame":i64|"seconds":f64 (default: playhead),"forward":bool=true,"track":"V1"|id?}"#,
+            has_seq,
+            |s, p| {
+                const CMD: &str = "timeline.trackSelect";
+                let t = time_p(s, p, "").unwrap_or(s.playhead());
+                let fwd = bool_p(p, "forward").unwrap_or(true);
+                let only = track_p(s, p, "track", CMD)?;
+                let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+                let hit = |start: Tick, end: Tick| if fwd { end > t } else { start < t };
+                let clips: Vec<ClipId> = q
+                    .all_tracks()
+                    .filter(|tr| !tr.locked && only.is_none_or(|o| o == tr.id))
+                    .flat_map(|tr| tr.items.iter())
+                    .filter(|i| hit(i.start, i.end()))
+                    .map(|i| i.id)
+                    .collect();
+                let captions: Vec<ClipId> = q
+                    .caption_tracks
+                    .iter()
+                    .filter(|tr| !tr.locked && only.is_none_or(|o| o == tr.id))
+                    .flat_map(|tr| tr.captions.iter())
+                    .filter(|c| hit(c.start, c.end()))
+                    .map(|c| c.id)
+                    .collect();
+                s.state.edit_points.clear();
+                s.state.trim_shift = Default::default();
+                s.state.transition_selection.clear();
+                s.state.selection = clips;
+                s.state.caption_selection = captions;
+                Ok(json!({
+                    "selection": s.state.selection.iter().map(|c| c.0).collect::<Vec<_>>(),
+                    "captions": s.state.caption_selection.iter().map(|c| c.0).collect::<Vec<_>>(),
+                }))
+            }
+        ),
         cmd!(
             "timeline.move",
             "Move Clips",
             [],
             None,
-            r#"{"moves":[{"clip":id,"track":id|"V2","time":ticks}],"insert":bool,"linked":bool?}"#,
+            r#"{"moves":[{"clip":id,"track":id|"V2","time":ticks}],"captions":[{"caption":id,"time":ticks}]?,"insert":bool,"linked":bool?}"#,
             has_seq,
             move_clips
         ),

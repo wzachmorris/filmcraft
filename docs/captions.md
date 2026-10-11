@@ -59,7 +59,10 @@ Details of each format and the SCC encoder are in [`crates/captions/README.md`](
 Tracks are addressed by id or `"C1"`, `"C2"`… (top first). Edits are limited by neighbouring
 captions and a one-frame minimum. Sync-locked caption tracks follow insert and extract edits on
 the media tracks (a caption across an insert point is split). `Add Edit to All Tracks` (⇧⌘K)
-also splits captions.
+also splits captions. The Track Select tools (A / ⇧A, `timeline.trackSelect`) select captions
+along with clips, so dragging that selection moves both together (`timeline.move` with
+`captions`) and Delete removes both: a caption the moved block lands on is cut back or removed,
+as a clip is in an overwrite.
 
 ## Timeline and Text panel
 

@@ -2942,8 +2942,8 @@
 	Graphics problem: switched to software compositing	グラフィックスに問題が発生したため、ソフトウェア合成に切り替えました
 	Exporting	書き出し中
 	Click to select, or click in empty space and drag to marquee select. Use Shift, Opt, and Cmd for other options.	クリックで選択します。何もない場所からドラッグすると範囲選択になります。Shift、Opt、Cmd キーを併用すると、ほかのオプションも使えます。
-	Click to select all clips to the right in all tracks. Shift-click for a single track.	クリックすると、全トラックでクリック位置より右にあるクリップをすべて選択します。Shift+クリックでは 1 つのトラックだけが対象になります。
-	Click to select all clips to the left in all tracks. Shift-click for a single track.	クリックすると、全トラックでクリック位置より左にあるクリップをすべて選択します。Shift+クリックでは 1 つのトラックだけが対象になります。
+	Click to select all clips and captions to the right in all tracks. Shift-click for a single track.	クリックすると、全トラックでクリック位置より右にあるクリップと字幕をすべて選択します。Shift+クリックでは 1 つのトラックだけが対象になります。
+	Click to select all clips and captions to the left in all tracks. Shift-click for a single track.	クリックすると、全トラックでクリック位置より左にあるクリップと字幕をすべて選択します。Shift+クリックでは 1 つのトラックだけが対象になります。
 	Drag an edit point to ripple trim; later clips move to keep the gap closed.	編集点をドラッグしてリップルトリムします。後続のクリップも移動するため、ギャップは生じません。
 	Drag an edit point to roll it: the out of one clip and the in of the next move together.	編集点をドラッグしてロールトリムします。前のクリップのアウト点と次のクリップのイン点が一緒に動きます。
 	Drag an edge to change the clip's speed so it fills the new duration.	端をドラッグすると、新しい長さに収まるようにクリップの速度を変更します。

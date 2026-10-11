@@ -230,6 +230,84 @@ pub fn move_captions(seq: &mut Sequence, ids: &[ClipId], delta: Tick) -> Result<
     Ok(d)
 }
 
+/// Clear `range` on a caption track without closing it (a lift): captions inside go, a caption
+/// across an edge is cut back to it, a caption across the whole range is split around it. Pieces
+/// shorter than `min` go too.
+fn lift_range(tr: &mut CaptionTrack, range: TimeRange, min: Tick, ctx: &mut EditCtx) {
+    let (a, b) = (range.start, range.end());
+    let mut out = Vec::with_capacity(tr.captions.len().saturating_add(1));
+    for mut c in tr.captions.drain(..) {
+        let (s, e) = (c.start, c.end());
+        if e <= a || s >= b {
+            out.push(c);
+            continue;
+        }
+        if s < a && e > b {
+            let mut right = c.clone();
+            right.id = ClipId(ctx.alloc());
+            right.start = b;
+            right.duration = e - b;
+            right.cue_id = None;
+            right.clamp_words();
+            if right.duration >= min {
+                out.push(right);
+            }
+        }
+        if s < a {
+            c.duration = a - s;
+            c.clamp_words();
+            if c.duration >= min {
+                out.push(c);
+            }
+        } else if e > b {
+            c.start = b;
+            c.duration = e - b;
+            c.clamp_words();
+            if c.duration >= min {
+                out.push(c);
+            }
+        }
+        // else: entirely inside the range, gone
+    }
+    tr.captions = out;
+    tr.sort();
+}
+
+/// Move captions by exactly `delta`, as part of a drag that carries clips and captions together:
+/// what they land on gives way, as clips do in an overwrite (a caption across a landing edge is
+/// cut back, one inside a landing span goes). The block stops at the sequence start as one.
+/// Locked caption tracks refuse.
+pub fn move_captions_over(seq: &mut Sequence, ids: &[ClipId], delta: Tick, ctx: &mut EditCtx) -> Result<()> {
+    let mut tracks: Vec<TrackId> = Vec::new();
+    for id in ids {
+        let tid = owner(seq, *id)?;
+        if seq.caption_track(tid).is_some_and(|t| t.locked) {
+            return Err(EditError::Locked);
+        }
+        if !tracks.contains(&tid) {
+            tracks.push(tid);
+        }
+    }
+    let first = ids.iter().filter_map(|id| seq.find_caption(*id).map(|(_, c)| c.start)).min().unwrap_or(Tick::ZERO);
+    let delta = delta.max(-first);
+    if delta == Tick::ZERO {
+        return Ok(());
+    }
+    let min = ctx.min_duration;
+    for tid in tracks {
+        let tr = track_mut(seq, tid)?;
+        let (mut moving, staying): (Vec<Caption>, Vec<Caption>) = tr.captions.drain(..).partition(|c| ids.contains(&c.id));
+        tr.captions = staying;
+        for c in &mut moving {
+            c.shift(delta);
+            lift_range(tr, c.range(), min, ctx);
+        }
+        tr.captions.extend(moving);
+        tr.sort();
+    }
+    Ok(())
+}
+
 /// Delete captions. With `ripple`, later captions on the same track move left to close each gap.
 pub fn delete_captions(seq: &mut Sequence, ids: &[ClipId], ripple: bool) -> Result<usize> {
     let mut n = 0;

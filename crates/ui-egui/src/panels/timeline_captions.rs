@@ -69,6 +69,11 @@ pub fn paint(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, area: Re
     let painter = ui.painter().with_clip_rect(area);
     let sel = app.session.state.caption_selection.clone();
     let drag = drag_state(ui.ctx());
+    // a drag of clips carries the selected captions along: show them where they will land
+    let carry = match &app.tl.drag {
+        Some(super::timeline::Drag::Move { offset, .. }) => *offset,
+        _ => Tick::ZERO,
+    };
     let mut actions: Vec<(String, Value)> = Vec::new();
     for (i, (tr, row)) in seq.caption_tracks.iter().zip(rows(area, seq.caption_tracks.len())).enumerate() {
         let lane = Rect::from_min_max(pos2(content.min.x, row.min.y), pos2(content.max.x, row.max.y));
@@ -140,8 +145,11 @@ pub fn paint(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, area: Re
         let p = painter.with_clip_rect(lane);
         let (v0, v1) = (layout.tick_at(content.min.x - 2.0), layout.tick_at(content.max.x + 2.0));
         for c in tr.captions.iter().filter(|c| c.end() >= v0 && c.start <= v1) {
-            let r = block_rect(c, row, layout, drag);
             let selected = sel.contains(&c.id);
+            let mut r = block_rect(c, row, layout, drag);
+            if selected && carry != Tick::ZERO {
+                r = r.translate(vec2(layout.x_of((c.start + carry).max(Tick::ZERO)) - layout.x_of(c.start), 0.0));
+            }
             p.rect_filled(r, 3.0, if selected { FILL_SEL } else { FILL });
             if selected {
                 p.rect_stroke(r, 3.0, Stroke::new(1.0, t.clip_selected_border), StrokeKind::Inside);

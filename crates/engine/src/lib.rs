@@ -1131,6 +1131,8 @@ mod timeline_move_tests;
 #[cfg(test)]
 mod track_params_tests;
 #[cfg(test)]
+mod track_select_tests;
+#[cfg(test)]
 mod transcript_tests;
 #[cfg(test)]
 mod trim_tests;

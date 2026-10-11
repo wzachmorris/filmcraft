@@ -1700,8 +1700,8 @@ impl FilmcraftApp {
                 tl!("Click to select, or click in empty space and drag to marquee select. Use Shift, Opt, and Cmd for other options.")
             }
             state::Tool::Selection => tl!("Click to select, or click in empty space and drag to marquee select. Use Shift, Alt, and Ctrl for other options."),
-            state::Tool::TrackSelectForward => tl!("Click to select all clips to the right in all tracks. Shift-click for a single track."),
-            state::Tool::TrackSelectBackward => tl!("Click to select all clips to the left in all tracks. Shift-click for a single track."),
+            state::Tool::TrackSelectForward => tl!("Click to select all clips and captions to the right in all tracks. Shift-click for a single track."),
+            state::Tool::TrackSelectBackward => tl!("Click to select all clips and captions to the left in all tracks. Shift-click for a single track."),
             state::Tool::Ripple => tl!("Drag an edit point to ripple trim; later clips move to keep the gap closed."),
             state::Tool::Rolling => tl!("Drag an edit point to roll it: the out of one clip and the in of the next move together."),
             state::Tool::RateStretch => tl!("Drag an edge to change the clip's speed so it fills the new duration."),
