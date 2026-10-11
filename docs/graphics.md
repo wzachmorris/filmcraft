@@ -138,7 +138,10 @@ rotation, opacity), **Text** (Source Text field, font family and style, size, pa
 tracking, leading, baseline shift, box width and height, faux bold / faux italic / all caps /
 small caps / underline, kerning and ligatures; the wrench in the section's header opens **Text
 Properties**: Text Layer Type and Ligatures), **Shape**, and **Appearance** (fill, two strokes, background,
-shadow). Automation ids: `graphics.layers.<n>`, `graphics.prop.<parameter id>`,
+shadow). On macOS the native menu bar takes Cmd+C/X/V/A/Z before the window sees them; while
+the Source Text field or the Program monitor's text editor has the keyboard, those Edit menu
+items are handed to the field (`FilmcraftApp::text_field_event`), so pasting into a text layer
+works instead of pasting clips onto the Timeline. Automation ids: `graphics.layers.<n>`, `graphics.prop.<parameter id>`,
 `graphics.align.<how>`, `graphics.distribute.<axis>`, `graphics.sourceText`, `graphics.NewTextLayer`,
 `graphics.NewRectangle`, `graphics.NewEllipse`, `graphics.deleteLayer`, `graphics.section.<name>`,
 `graphics.textProperties` (the wrench) and in its dialog `graphics.textProperties.type`,

@@ -151,6 +151,9 @@ pub struct HostHooks {
     /// Files or an image on the system clipboard, for Paste in the Timeline and the Project panel
     /// (#611). Without it Paste only pastes clips copied in FilmCraft.
     pub clipboard_media: Option<Box<dyn FnMut() -> Option<ClipboardMedia>>>,
+    /// Text on the system clipboard, for Edit ▸ Paste from the native menu bar while a text field
+    /// has the keyboard (see [`text_field_event`]). Without it that paste inserts nothing.
+    pub clipboard_text: Option<Box<dyn FnMut() -> Option<String>>>,
 }
 
 /// What [`HostHooks::clipboard_media`] found on the system clipboard.
@@ -1589,7 +1592,19 @@ impl FilmcraftApp {
         self.sync_timeline_view();
         self.handle_drops(&ctx);
         if let Some(rx) = self.command_inbox.take() {
+            // The native menu bar owns Cmd+C/X/V/A/Z as key equivalents, so while a text field
+            // has the keyboard those keystrokes arrive here as Edit menu commands, not as keys:
+            // hand them to the field instead of the Timeline.
+            let typing = ctx.egui_wants_keyboard_input();
             while let Ok(id) = rx.try_recv() {
+                if typing {
+                    let text =
+                        if matches!(id.as_str(), "edit.paste" | "edit.pasteInsert") { self.hooks.clipboard_text.as_mut().and_then(|f| f()) } else { None };
+                    if let Some(ev) = text_field_event(&id, text) {
+                        ctx.input_mut(|i| i.events.push(ev));
+                        continue;
+                    }
+                }
                 if let Err(e) = menus::invoke(self, &ctx, &id, json!({})) {
                     self.ui.status = e;
                 }
@@ -2015,6 +2030,26 @@ pub fn playback_mix(session: &Session, seq_id: filmcraft_project::ItemId, sr: u3
     }
 }
 
+/// The egui event an Edit menu command stands for inside a text field: on macOS the native menu
+/// bar takes Cmd+C/X/V/A/Z as key equivalents before the window sees them, so with the Source
+/// Text field (or the Program monitor's text editor) focused, Cmd+V pasted clips into the
+/// Timeline and the field got nothing. Paste carries the clipboard `text` (none: an empty paste,
+/// which still keeps the clips off the Timeline); Select All, Undo and Redo become the key
+/// presses egui's text editing reads. Other commands are not for the field.
+pub fn text_field_event(id: &str, text: Option<String>) -> Option<egui::Event> {
+    use egui::{Event, Key, Modifiers};
+    let key = |key: Key, modifiers: Modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+    match id {
+        "edit.paste" | "edit.pasteInsert" => Some(Event::Paste(text.unwrap_or_default())),
+        "edit.copy" => Some(Event::Copy),
+        "edit.cut" => Some(Event::Cut),
+        "edit.selectAll" => Some(key(Key::A, Modifiers::COMMAND)),
+        "edit.undo" => Some(key(Key::Z, Modifiers::COMMAND)),
+        "edit.redo" => Some(key(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT)),
+        _ => None,
+    }
+}
+
 /// The windowing layer (egui-winit, and egui's web backend) reports the clipboard shortcuts as
 /// `Event::Copy` / `Event::Cut` / `Event::Paste` instead of key presses: Ctrl+C/X/V on Windows and
 /// Linux, plus Ctrl+Insert, Shift+Insert and Shift+Delete on Windows. The shortcut bindings only
@@ -2052,6 +2087,22 @@ mod clipboard_key_tests {
         let mut events = events;
         super::clipboard_events_as_keys(&mut events, m);
         events.into_iter().filter_map(|e| if let Event::Key { key, modifiers, pressed: true, .. } = e { Some((key, modifiers)) } else { None }).collect()
+    }
+
+    #[test]
+    fn edit_menu_commands_reach_a_text_field_as_events() {
+        use super::text_field_event;
+        assert!(matches!(text_field_event("edit.paste", Some("hola".into())), Some(Event::Paste(s)) if s == "hola"));
+        assert!(matches!(text_field_event("edit.pasteInsert", None), Some(Event::Paste(s)) if s.is_empty()), "no text: still not a Timeline paste");
+        assert!(matches!(text_field_event("edit.copy", None), Some(Event::Copy)));
+        assert!(matches!(text_field_event("edit.cut", None), Some(Event::Cut)));
+        assert!(matches!(text_field_event("edit.selectAll", None), Some(Event::Key { key: Key::A, modifiers: Modifiers::COMMAND, pressed: true, .. })));
+        assert!(matches!(text_field_event("edit.undo", None), Some(Event::Key { key: Key::Z, modifiers: Modifiers::COMMAND, .. })));
+        assert!(
+            matches!(text_field_event("edit.redo", None), Some(Event::Key { key: Key::Z, modifiers, .. }) if modifiers == Modifiers::COMMAND | Modifiers::SHIFT)
+        );
+        assert!(text_field_event("edit.clear", None).is_none(), "Delete is for the Timeline");
+        assert!(text_field_event("file.save", None).is_none());
     }
 
     #[test]
