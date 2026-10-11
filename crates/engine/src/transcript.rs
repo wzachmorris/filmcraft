@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use filmcraft_edit as edit;
 use filmcraft_edit::transcript::{self as tx, CaptionRules, SeqWord};
-use filmcraft_project::{CaptionFormat, CaptionTrack, ItemId, ItemKind, TrackId, Transcript};
+use filmcraft_project::{CaptionFormat, CaptionTrack, ClipId, ItemId, ItemKind, TrackId, Transcript};
 use filmcraft_speech::{Options, SpeechError, Transcriber};
 use filmcraft_time::{TICKS_PER_SECOND, Tick, TimeRange};
 
@@ -376,7 +376,32 @@ fn remove_fillers(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
-    let words = sequence_words(s);
+    const CMD: &str = "transcript.createCaptions";
+    let mut words = sequence_words(s);
+    // `clips` / `selection`: only the words heard while those clips play (any track)
+    let scope: Option<Vec<ClipId>> = if bool_p(p, "selection").unwrap_or(false) {
+        Some(s.state.selection.clone())
+    } else {
+        p.get("clips").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(ClipId).collect())
+    };
+    if let Some(ids) = scope {
+        let q = s.active_sequence().ok_or(EngineError::NoSequence)?;
+        let ranges: Vec<TimeRange> = ids.iter().filter_map(|c| q.find_item(*c).map(|(_, i)| i.range())).collect();
+        if ranges.is_empty() {
+            return Err(bad(CMD, "select the clips to caption first"));
+        }
+        words.retain(|w| ranges.iter().any(|r| w.start >= r.start && w.start < r.end()));
+        if words.is_empty() {
+            return Err(bad(CMD, "no transcript under the selected clips (Transcribe first)"));
+        }
+    }
+    // where they go: a new track (default), or an existing one: "C1", an id, or "top" (the first
+    // caption track, a new one when there is none) — what they land on there gives way
+    let into: Option<TrackId> = match p.get("track") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) if t == "top" => s.active_sequence().and_then(|q| q.caption_tracks.first().map(|t| t.id)),
+        Some(_) => Some(crate::captions::track_param(s, p).ok_or_else(|| bad(CMD, "no such caption track (`track`)"))?),
+    };
     let d = CaptionRules::default();
     let rules = CaptionRules {
         max_chars: u64_p(p, "maxChars").map(|n| n as usize).unwrap_or(d.max_chars),
@@ -391,14 +416,43 @@ fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_p(p, "name").unwrap_or("Transcript").to_string();
     let n = blocks.len();
     let tid = s.edit_sequence("Create Captions", |q, ctx, st| {
-        let tid = TrackId(ctx.alloc());
-        let mut t = CaptionTrack::new(tid, name, format);
-        t.captions = tx::blocks_to_captions(&blocks, &words, ctx);
-        q.caption_tracks.insert(0, t);
+        let captions = tx::blocks_to_captions(&blocks, &words, ctx);
+        let tid = match into {
+            Some(tid) => {
+                edit::captions::place_captions(q, tid, captions, ctx)?;
+                tid
+            }
+            None => {
+                let tid = TrackId(ctx.alloc());
+                let mut t = CaptionTrack::new(tid, name, format);
+                t.captions = captions;
+                q.caption_tracks.insert(0, t);
+                tid
+            }
+        };
         st.caption_selection.clear();
         Ok(tid)
     })?;
     Ok(json!({"track": tid.0, "captions": n}))
+}
+
+fn has_selected_transcript(s: &Session) -> std::result::Result<(), String> {
+    has_transcript(s)?;
+    if s.state.selection.is_empty() { Err("select the clips to caption first".into()) } else { Ok(()) }
+}
+
+/// `transcript.createCaptionsForSelection`: captions for the selected clips only, onto the top
+/// caption track (made when there is none).
+fn create_captions_for_selection(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut p = p.clone();
+    match p.as_object_mut() {
+        Some(o) => {
+            o.insert("selection".into(), json!(true));
+            o.entry("track").or_insert(json!("top"));
+        }
+        None => p = json!({"selection": true, "track": "top"}),
+    }
+    create_captions(s, &p)
 }
 
 fn models(_: &mut Session, _: &Value) -> Result<Value> {
@@ -484,9 +538,18 @@ pub fn commands() -> Vec<CommandSpec> {
             "transcript.createCaptions",
             "Create Captions from Transcript…",
             &["Sequence", "Transcript"],
-            r#"{"maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?,"format":str?,"name":str?}"#,
+            r#"{"clips":[id]?,"selection":bool?,"track":id|"C1"|"top"?,"maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?,"format":str?,"name":str?}"#,
             has_transcript,
             create_captions,
+            true,
+        ),
+        spec(
+            "transcript.createCaptionsForSelection",
+            "Create Captions for Selected Clips",
+            &["Sequence", "Transcript"],
+            r#"{"track":id|"C1"|"top"="top","maxChars":n?,"lines":1|2?,"minSeconds":f?,"maxSeconds":f?,"gapFrames":n?}"#,
+            has_selected_transcript,
+            create_captions_for_selection,
             true,
         ),
     ]

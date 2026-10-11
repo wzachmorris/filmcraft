@@ -179,3 +179,54 @@ fn generate_without_a_transcriber() {
     let r = s.execute("transcript.generate", json!({})).unwrap();
     assert!(r["items"].as_array().unwrap().len() >= 2, "{r}");
 }
+
+/// Captions for the selected clips only, onto the existing top track: what was there under them
+/// gives way, the rest of the track stays.
+#[test]
+fn captions_for_the_selected_clips_replace_only_that_stretch() {
+    let (mut s, item, start) = session();
+    s.execute("transcript.generate", json!({"items": [item.0]})).unwrap();
+    // cut the clip at 2 s: the first speaker before, the second after
+    s.execute("playhead.set", json!({"time": (start + Tick::from_seconds_f64(2.0)).0})).unwrap();
+    s.execute("sequence.addEditAllTracks", json!({})).unwrap();
+    let q = s.active_sequence().unwrap();
+    let second = q.audio_tracks[0].items.iter().find(|i| i.start > start).map(|i| i.id).unwrap();
+    let a1 = q.audio_tracks[0].items.len();
+    assert!(a1 >= 2, "the clip was cut: {a1}");
+
+    // nothing selected: refused; a clip without words: refused
+    assert!(s.execute("transcript.createCaptionsForSelection", json!({})).is_err());
+    assert!(s.execute("transcript.createCaptions", json!({"clips": [987_654_321u64]})).is_err());
+
+    // no caption track yet: "top" makes one, with the selected clip's words only
+    s.execute("timeline.select", json!({"clips": [second.0]})).unwrap();
+    let r = s.execute("transcript.createCaptionsForSelection", json!({"maxChars": 32})).unwrap();
+    let q = s.active_sequence().unwrap();
+    assert_eq!(q.caption_tracks.len(), 1, "{r}");
+    let texts: Vec<&str> = q.caption_tracks[0].captions.iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(texts, vec!["Second speaker here."], "{r}");
+    assert!(q.caption_tracks[0].captions[0].words.len() == 3, "word times kept: {:?}", q.caption_tracks[0].captions[0].words);
+
+    // the whole sequence onto that same track, then spoil the second caption and re-caption the
+    // second clip: only that stretch is replaced
+    let r = s.execute("transcript.createCaptions", json!({"maxChars": 32, "track": "C1"})).unwrap();
+    assert_eq!(r["captions"], 2, "{r}");
+    let q = s.active_sequence().unwrap();
+    assert_eq!(q.caption_tracks.len(), 1, "onto the existing track, not a new one");
+    let (first, stale) = (q.caption_tracks[0].captions[0].id, q.caption_tracks[0].captions[1].id);
+    s.execute("captions.setText", json!({"caption": stale.0, "text": "stale"})).unwrap();
+    s.execute("timeline.select", json!({"clips": [second.0]})).unwrap();
+    s.execute("transcript.createCaptionsForSelection", json!({"maxChars": 32})).unwrap();
+    let q = s.active_sequence().unwrap();
+    let texts: Vec<&str> = q.caption_tracks[0].captions.iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(texts, vec!["Hello um world.", "Second speaker here."], "the stale caption gave way, the first stayed");
+    assert_eq!(q.caption_tracks[0].captions[0].id, first);
+    assert!(q.find_caption(stale).is_none());
+    q.check().unwrap();
+
+    // a locked track refuses
+    s.execute("captions.setTrack", json!({"track": "C1", "locked": true})).unwrap();
+    assert!(s.execute("transcript.createCaptionsForSelection", json!({})).is_err());
+    // one undo per step
+    s.execute("captions.setTrack", json!({"track": "C1", "locked": false})).unwrap();
+}

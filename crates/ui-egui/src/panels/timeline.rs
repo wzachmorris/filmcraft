@@ -1687,6 +1687,7 @@ pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
         ("Reveal Nested Sequence", "sequence.revealNested"),
         ("Multi-Camera", "clip.multicam"),
     ],
+    &[("Create Captions for Selected Clips", "transcript.createCaptionsForSelection")],
     &[("Label", "edit.label")],
     &[("Speed/Duration…", "clip.speedDuration")],
     &[
@@ -2260,7 +2261,23 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                         .filter_map(|row| seq.track(row.track))
                         .flat_map(|tr| tr.items.iter().filter(|i| i.start < b && i.end() > a).map(|i| i.id.0))
                         .collect();
-                    Some(app.session.execute("timeline.select", json!({"clips": ids, "add": mods.shift})))
+                    // the caption rows above the tracks: their blocks under the lasso come too
+                    let cap_h = super::timeline_captions::ROW_H;
+                    let captions: Vec<u64> = seq
+                        .caption_tracks
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, tr)| {
+                            let top = layout.content.min.y + *i as f32 * cap_h;
+                            !tr.locked && Rect::from_min_max(pos2(layout.content.min.x, top), pos2(layout.content.max.x, top + cap_h)).intersects(r)
+                        })
+                        .flat_map(|(_, tr)| tr.captions.iter().filter(|c| c.start < b && c.end() > a).map(|c| c.id.0))
+                        .collect();
+                    let clips = app.session.execute("timeline.select", json!({"clips": ids, "add": mods.shift}));
+                    if !captions.is_empty() {
+                        let _ = app.session.execute("captions.select", json!({"captions": captions, "add": mods.shift}));
+                    }
+                    Some(clips)
                 } else {
                     None
                 }

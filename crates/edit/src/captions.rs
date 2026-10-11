@@ -308,6 +308,21 @@ pub fn move_captions_over(seq: &mut Sequence, ids: &[ClipId], delta: Tick, ctx: 
     Ok(())
 }
 
+/// Put `captions` on a caption track, replacing whatever they land on (a caption across a landing
+/// edge is cut back, one inside a landing span goes). Returns how many were placed. A locked
+/// track refuses.
+pub fn place_captions(seq: &mut Sequence, track: TrackId, captions: Vec<Caption>, ctx: &mut EditCtx) -> Result<usize> {
+    let min = ctx.min_duration;
+    let tr = track_mut(seq, track)?;
+    let n = captions.len();
+    for c in &captions {
+        lift_range(tr, c.range(), min, ctx);
+    }
+    tr.captions.extend(captions);
+    tr.sort();
+    Ok(n)
+}
+
 /// Delete captions. With `ripple`, later captions on the same track move left to close each gap.
 pub fn delete_captions(seq: &mut Sequence, ids: &[ClipId], ripple: bool) -> Result<usize> {
     let mut n = 0;

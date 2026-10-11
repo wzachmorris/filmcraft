@@ -65,7 +65,12 @@ along with clips, so dragging that selection moves both together (`timeline.move
 as a clip is in an overwrite. The tools work on the caption rows too: a click there takes
 everything from that time on, a Shift-click only that track's captions (`track: "C1"`), and the
 caption row's right-click menu offers Select Captions From Here / Up To Here / All on This Track
-without changing tool. A drag of a caption block then moves every selected caption.
+without changing tool. A lasso (drag in empty space) that crosses the caption rows takes the
+caption blocks under it as well. A drag of a caption block then moves every selected caption.
+Captions for a part of the sequence come from the clips: select them and use Create Captions for
+Selected Clips (clip menu, Sequence ▸ Transcript, or the Text panel's Transcript tab); the words
+heard during those clips land on the top caption track with their word times, replacing whatever
+captions were there.
 
 ## Timeline and Text panel
 

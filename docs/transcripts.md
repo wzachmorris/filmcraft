@@ -32,7 +32,8 @@ the control channel and MCP agents can do the same.
 | `transcript.renameSpeaker` | Rename a speaker by name (every transcript) or by index in one `item`. |
 | `transcript.removeFillers` | Ripple-delete filler words (`fillers`, default um/uh/erm/…; phrases such as "you know" allowed). |
 | `transcript.removePauses` | Ripple-delete pauses longer than `minSeconds`, keeping `keepSeconds` of air on both sides. |
-| `transcript.createCaptions` | Lay the words out as captions on a new caption track (`maxChars`, `lines`, `minSeconds`, `maxSeconds`, `gapFrames`). |
+| `transcript.createCaptions` | Lay the words out as captions on a new caption track (`maxChars`, `lines`, `minSeconds`, `maxSeconds`, `gapFrames`). `clips: [id]` or `selection: true` takes only the words heard while those clips play; `track: "C1" \| id \| "top"` puts them on an existing track instead (the first one with `"top"`, made when there is none), replacing what they land on. |
+| `transcript.createCaptionsForSelection` | The selected clips' words as captions onto the top caption track: Sequence ▸ Transcript, the clip's right-click menu, or the Text panel's "Captions for selected clips" button. Re-caption a part you changed without touching the rest. |
 | `transcript.models` / `transcript.downloadModel` | List the speech models (size, licence, installed) / download one. |
 
 ## Speech recognition
