@@ -769,6 +769,7 @@ mod tests {
             source_in: Tick::ZERO,
             speed: 1.0,
             reverse: false,
+            maintain_pitch: false,
             enabled: true,
             link: None,
             group: None,

@@ -1,6 +1,11 @@
 //! Clip-level audio: clip gain → clip effects → Volume / Channel Volume / Panner, audio transitions
-//! and speed changes (varispeed resampling), summed per track. The track/submix/Mix graph that
-//! consumes it is [`crate::mixer`].
+//! and speed changes (varispeed resampling, or a pitch-keeping time stretch with the clip's
+//! Maintain Audio Pitch: [`filmcraft_audio_dsp::stretch`]), summed per track. The track/submix/Mix
+//! graph that consumes it is [`crate::mixer`].
+//!
+//! A time stretch carries state from block to block (the grain chain), which this stateless mixer
+//! keeps in a thread-local cache per clip: playback and export each mix on one thread, block after
+//! block, so a clip's stream continues; a seek restarts it where it lands.
 //!
 //! Stereo, mono and adaptive tracks carry two channels. 5.1 tracks carry six (L, R, C, LFE, Ls,
 //! Rs): their clips play the source's first six channels (or the six `source_channels` picked with
@@ -8,9 +13,11 @@
 //! speakers ([`filmcraft_audio_dsp::channels`]). The clip Panner (stereo balance) does not apply to
 //! 5.1 clips, and Channel Volume's left/right levels apply to L and R.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use filmcraft_audio_dsp::channels::{self as chans, Layout, Mixdown};
+use filmcraft_audio_dsp::stretch::Stretcher;
 use filmcraft_frame::AudioBuffer;
 use filmcraft_project::{AudioChannels, Project, Sequence, Track, TrackId, TrackItem};
 use filmcraft_time::{Tick, TimeRange};
@@ -370,6 +377,8 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32
         remixed
     } else if (speed - 1.0).abs() < 1e-9 && !item.reverse {
         src(src_start_ticks.to_units_floor(sr as i64), n)
+    } else if item.maintain_pitch && !item.reverse {
+        stretched(item, src, a0, n, sr, item_s0)
     } else {
         // varispeed: read a longer span and resample linearly
         let span = ((n as f64) * speed).ceil() as usize + 2;
@@ -412,6 +421,44 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32
         dst[off..off + m].copy_from_slice(&ch[..m]);
     }
     out
+}
+
+/// Stretch streams of the clips this thread is mixing, by clip id and sample rate, with when each
+/// was last used.
+type Stretchers = HashMap<(u64, u32), (Stretcher, u64)>;
+/// Streams kept per thread before the least recently used go.
+const STRETCHERS_KEPT: usize = 64;
+
+thread_local! {
+    static STRETCHERS: RefCell<(Stretchers, u64)> = RefCell::new((HashMap::new(), 0));
+}
+
+/// The clip's audio for timeline samples `a0 .. a0 + n` time-stretched to its speed with the pitch
+/// kept, continuing this thread's stream for the clip (started afresh at a seek, or when the clip's
+/// speed or placement changed).
+fn stretched(item: &TrackItem, src: SourceAudio, a0: i64, n: usize, sr: u32, item_s0: i64) -> Option<AudioBuffer> {
+    let speed = item.speed.abs();
+    let src_origin = item.source_in.to_units_floor(sr as i64);
+    let key = (item.id.0, sr);
+    let channels = STRETCHERS.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let (map, clock) = &mut *guard;
+        *clock = clock.wrapping_add(1);
+        let now = *clock;
+        if map.len() >= STRETCHERS_KEPT
+            && !map.contains_key(&key)
+            && let Some(old) = map.iter().min_by_key(|(_, (_, used))| *used).map(|(k, _)| *k)
+        {
+            map.remove(&old);
+        }
+        let entry = map.entry(key).or_insert_with(|| (Stretcher::new(speed, sr, item_s0, src_origin), now));
+        if (entry.0.speed() - speed).abs() > 1e-9 || entry.0.origins() != (item_s0, src_origin) {
+            entry.0 = Stretcher::new(speed, sr, item_s0, src_origin);
+        }
+        entry.1 = now;
+        entry.0.process(a0, n, |pos, len| src(pos, len).map(|b| b.channels).unwrap_or_default())
+    });
+    Some(AudioBuffer { sample_rate: sr, channels })
 }
 
 /// The source channels a clip on a 5.1 track plays: six picked channels (Modify ▸ Audio Channels),

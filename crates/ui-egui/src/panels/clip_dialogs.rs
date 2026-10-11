@@ -24,7 +24,7 @@
 //! - Frame Hold Options `frameHold.*`: `enabled`, `holdOn.<in|out|playhead|sourceTimecode|sequenceTime>`,
 //!   `timecode`, `holdFilters`;
 //! - Field Options `fieldOptions.*`: `reverseFieldDominance`, `processing.<none|alwaysDeinterlace|flickerRemoval>`;
-//! - Clip Speed / Duration `speedDuration.*`: `speed`, `reverse`, `ripple`,
+//! - Clip Speed / Duration `speedDuration.*`: `speed`, `reverse`, `ripple`, `maintainPitch`,
 //!   `interpolation.<frameSampling|frameBlending|opticalFlow>`;
 //! - Close Project `closeProject.save`, `closeProject.dontSave`, `closeProject.cancel`.
 
@@ -206,8 +206,10 @@ fn defaults(app: &FilmcraftApp, id: &str) -> (Value, Value) {
             let fps = q.map(|q| q.settings.frame_rate.as_f64()).unwrap_or(24.0);
             let speed = it.as_ref().map_or(1.0, |i| i.speed);
             let interp = it.as_ref().map_or(filmcraft_project::TimeInterpolation::default(), |i| i.time_interpolation);
+            // Maintain Audio Pitch: as the clip has it, on for a clip whose speed was never changed
+            let keep_pitch = it.as_ref().is_none_or(|i| i.maintain_pitch || (i.speed - 1.0).abs() < 1e-9);
             (
-                json!({"speed": (speed.abs() * 100.0 * 100.0).round() / 100.0, "reverse": speed < 0.0, "ripple": false, "interpolation": interp.name()}),
+                json!({"speed": (speed.abs() * 100.0 * 100.0).round() / 100.0, "reverse": speed < 0.0, "ripple": false, "maintainPitch": keep_pitch, "interpolation": interp.name()}),
                 json!({"duration": it.as_ref().map_or(0, |i| i.duration.0), "speed": speed.abs(), "fps": fps}),
             )
         }
@@ -511,6 +513,7 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
                 }
                 check(ui, &mut elems, pre, p, "reverse", tl!("Reverse Speed"), true);
                 check(ui, &mut elems, pre, p, "ripple", tl!("Ripple Edit, Shifting Trailing Clips"), true);
+                check(ui, &mut elems, pre, p, "maintainPitch", tl!("Maintain Audio Pitch"), true);
                 ui.label(RichText::new(tl!("Time Interpolation")).strong());
                 for m in filmcraft_project::TimeInterpolation::ALL {
                     let r = ui.radio(p["interpolation"].as_str() == Some(m.name()), crate::i18n::t(m.label()));

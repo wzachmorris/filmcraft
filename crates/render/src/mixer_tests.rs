@@ -825,3 +825,50 @@ fn a_nest_trimmed_in_starts_later_in_its_sequence() {
     let mix = mix_graph(&p, p.sequence(outer).unwrap(), start, 4800, &map, None);
     assert!(worst(&mix, start, 8, |t| tone.at(t + 3.0)) < 0.01);
 }
+
+/// A 48 kHz sequence whose A1 holds one 5 s clip of the 500 Hz tone at `speed`, with or without
+/// Maintain Audio Pitch.
+fn tone_clip(speed: f64, keep_pitch: bool) -> (Project, ItemId, SourceMap, Arc<Tone>) {
+    let (mut p, outer, map, tone) = nested_tone(48_000);
+    // the nest's inner clip is the tone itself; put a clip of the media on the outer sequence instead
+    let media = *map.0.keys().next().unwrap();
+    let five = TimeRange::new(Tick::ZERO, Tick(5 * TICKS_PER_SECOND));
+    let mut clip = p.make_track_item(media, TrackKind::Audio, Tick::ZERO, five, FrameRate::FPS_24).unwrap();
+    clip.speed = speed;
+    clip.maintain_pitch = keep_pitch;
+    let q = p.sequence_mut(outer).unwrap();
+    q.audio_tracks[0].items.clear();
+    q.audio_tracks[0].items.push(clip);
+    (p, outer, map, tone)
+}
+
+fn zero_crossings_per_second(v: &[f32]) -> f64 {
+    v.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count() as f64 / (v.len() as f64 / 48_000.0)
+}
+
+#[test]
+fn maintain_audio_pitch_keeps_the_tone_while_the_clip_runs_faster() {
+    // without it, 1.5x is a fifth up (750 Hz = 1500 crossings/s); with it, still 500 Hz
+    let (p, outer, map, _) = tone_clip(1.5, false);
+    let mut plain = Vec::new();
+    for b in 0..100 {
+        plain.extend_from_slice(&mix_graph(&p, p.sequence(outer).unwrap(), 48_000 + b * 480, 480, &map, None).channels[0]);
+    }
+    assert!((zero_crossings_per_second(&plain) - 1500.0).abs() < 60.0, "resampled: {}", zero_crossings_per_second(&plain));
+    let (p, outer, map, _) = tone_clip(1.5, true);
+    let mut kept = Vec::new();
+    for b in 0..100 {
+        kept.extend_from_slice(&mix_graph(&p, p.sequence(outer).unwrap(), 48_000 + b * 480, 480, &map, None).channels[0]);
+    }
+    let zc = zero_crossings_per_second(&kept[2400..]);
+    assert!((zc - 1000.0).abs() < 60.0, "stretched: {zc} crossings/s");
+    let peak = kept.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(peak > 0.42 && peak < 0.52, "level kept: {peak}");
+    // the stream continues across blocks: no gaps (a long run of near-zero samples)
+    let longest_silence = kept[2400..].split(|v| v.abs() > 0.01).map(<[f32]>::len).max().unwrap_or(0);
+    assert!(longest_silence < 200, "longest near-silent run {longest_silence} samples");
+    // a seek restarts the stream rather than playing on from where it was
+    let a = mix_graph(&p, p.sequence(outer).unwrap(), 10 * 480, 480, &map, None);
+    let b = mix_graph(&p, p.sequence(outer).unwrap(), 10 * 480, 480, &map, None);
+    assert_eq!(a.channels[0], b.channels[0], "the same block twice is the same sound");
+}

@@ -439,6 +439,7 @@ impl Builder {
             source_in,
             speed: 1.0,
             reverse: false,
+            maintain_pitch: false,
             enabled: true,
             link: None,
             group: None,

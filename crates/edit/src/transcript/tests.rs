@@ -43,6 +43,7 @@ fn clip(id: u64, start: f64, dur: f64, src_in: f64) -> TrackItem {
         source_in: s(src_in),
         speed: 1.0,
         reverse: false,
+        maintain_pitch: false,
         enabled: true,
         link: None,
         group: None,

@@ -472,6 +472,15 @@ clip media (source In … +duration) ─► audio_dsp::remix::analyze: spectral-
   ─► hidden clip effect `remix` (target, sliders, original duration, plan in ticks) ─► render::remix::read (20 ms equal-power crossfades)
 ```
 
+Clip ▸ Speed/Duration… (`clip.speedDuration`, Cmd+R) changes a clip's speed (ripple optional) and,
+with **Maintain Audio Pitch** (on by default in the dialog; `maintainPitch`, kept per clip as
+`TrackItem::maintain_pitch`), time-stretches its sound instead of resampling it: a voice at 115 %
+stays at its pitch, in playback and export alike. The stretch is WSOLA (24 ms Hann grains, half
+overlapping, each slid up to ±9 ms to continue the last; `filmcraft_audio_dsp::stretch`), shared
+with the Program monitor's shuttle. The mixer is stateless per block, so `render::audio` keeps each
+clip's grain chain in a thread-local cache (playback and export each mix on one thread, block after
+block); a seek restarts the chain where it lands. Reverse clips and remixed music resample as before.
+
 Clip ▸ Remix ▸ Enable Remix / Remix Properties… / Revert Remix (`clip.remix.*`; agents can use `clip.remix {duration|seconds…}`) and the Remix tool in the Rate Stretch group (drag a music clip's Out edge) retime a music clip to a target duration. The analysis finds the beat and compares every pair of beats by harmony (chroma) and timbre (cepstra). Each joint leaves the music at one beat boundary and continues at the beat boundary whose four beats on either side sound most alike. The intro and outro are kept, and the result lands within one beat of the target. Segments (0–100) sets the number of joints (1–3, more for long extensions). Variations (0–100) sets how far a joint may move from its evenly spaced position (±1–8 beats). The state is a hidden effect instance with no definition, so panels, the effect chain and Paste Attributes ignore it. The plan is stored in ticks, so playback and export read it without re-analysing. A remix never moves other clips: one that would overlap the next clip is refused, and Revert restores the original duration. Results are deterministic and the analysis is cached per media range.
 
 ### 5.2 Essential Sound

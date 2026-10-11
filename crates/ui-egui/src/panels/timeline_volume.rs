@@ -319,6 +319,7 @@ mod tests {
             source_in: Tick(500),
             speed,
             reverse,
+            maintain_pitch: false,
             enabled: true,
             link: None,
             group: None,
