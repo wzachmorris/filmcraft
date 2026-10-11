@@ -156,6 +156,8 @@ pub struct Preferences {
     pub media: MediaPrefs,
     pub media_analysis: settings::MediaAnalysisPrefs,
     pub media_cache: settings::MediaCachePrefs,
+    /// The caption track style new tracks start from (the last one set).
+    pub captions: settings::CaptionPrefs,
     pub memory: settings::MemoryPrefs,
     pub playback: PlaybackPrefs,
     pub plugins: settings::PluginPrefs,
@@ -186,6 +188,7 @@ impl Default for Preferences {
             media: Default::default(),
             media_analysis: Default::default(),
             media_cache: Default::default(),
+            captions: Default::default(),
             memory: Default::default(),
             playback: Default::default(),
             plugins: Default::default(),

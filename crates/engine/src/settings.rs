@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use filmcraft_project::Label;
+use filmcraft_project::{CaptionStyle, Label};
 use filmcraft_time::{FrameRate, Tick};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -422,6 +422,15 @@ impl Default for MediaAnalysisPrefs {
             whisper_model: filmcraft_speech::models::DEFAULT_MODEL.into(),
         }
     }
+}
+
+/// Captions (stored only, no Settings page): the track style last set with `captions.setStyle`
+/// (the Text panel's style strip), which every new caption track starts from, so a font, size
+/// and word highlight chosen once carry over to the next sequence, as in CapCut.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CaptionPrefs {
+    pub default_style: Option<CaptionStyle>,
 }
 
 /// Settings ▸ Media Cache.

@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::Session;
-use filmcraft_project::ClipId;
+use filmcraft_project::{CaptionStyle, ClipId};
 use filmcraft_time::{TICKS_PER_SECOND, Tick};
 
 fn demo() -> Session {
@@ -157,4 +157,39 @@ fn caption_list_track_filter_never_falls_back_to_every_track() {
     for sel in [json!(missing), json!("C3"), json!("C0"), json!("nope")] {
         assert!(s.execute("captions.list", json!({"track": sel})).is_err(), "{sel} names no caption track");
     }
+}
+
+/// The style last set (the Text panel's strip) is what every new caption track starts from, in
+/// this project and the next: a preference, not a project setting. `reset` is remembered too.
+#[test]
+fn new_caption_tracks_start_from_the_last_style_set() {
+    let mut s = demo();
+    assert!(s.prefs.captions.default_style.is_none(), "a fresh install starts from the built-in style");
+    s.execute("captions.newTrack", json!({})).unwrap();
+    assert_eq!(s.active_sequence().unwrap().caption_tracks[0].style, CaptionStyle::default());
+    s.execute("captions.setStyle", json!({"track": "C1", "font": "Bebas Neue", "size": 56, "highlight": true})).unwrap();
+    assert_eq!(s.prefs.captions.default_style.as_ref().map(|y| y.font.as_str()), Some("Bebas Neue"));
+    s.execute("captions.newTrack", json!({"name": "second"})).unwrap();
+    let q = s.active_sequence().unwrap();
+    let t = &q.caption_tracks[0];
+    assert_eq!(t.name, "second", "new tracks go on top");
+    assert_eq!((t.style.font.as_str(), t.style.size, t.style.highlight), ("Bebas Neue", 56.0, true));
+    let second = t.id;
+    // the preference survives the trip through preferences.json
+    let json = serde_json::to_value(&s.prefs).unwrap();
+    let back: crate::autosave::Preferences = serde_json::from_value(json).unwrap();
+    assert_eq!(back.captions.default_style, s.prefs.captions.default_style);
+    // CEA-608's opaque box still applies over the remembered style
+    s.execute("captions.newTrack", json!({"format": "CEA-608"})).unwrap();
+    let t = &s.active_sequence().unwrap().caption_tracks[0];
+    assert_eq!((t.style.font.as_str(), t.style.background_color), ("Bebas Neue", [0, 0, 0, 255]));
+    // reset goes back to the built-in style, and that is remembered as well
+    s.execute("captions.setStyle", json!({"track": second.0, "reset": true})).unwrap();
+    assert_eq!(s.prefs.captions.default_style, Some(CaptionStyle::default()));
+    s.execute("captions.newTrack", json!({})).unwrap();
+    assert_eq!(s.active_sequence().unwrap().caption_tracks[0].style, CaptionStyle::default());
+    // a failed style change remembers nothing new
+    s.execute("captions.setStyle", json!({"track": second.0, "font": "Inter"})).unwrap();
+    assert!(s.execute("captions.setStyle", json!({"track": second.0, "font": "Nope", "anchor": "sideways"})).is_err());
+    assert_eq!(s.prefs.captions.default_style.as_ref().map(|y| y.font.as_str()), Some("Inter"));
 }

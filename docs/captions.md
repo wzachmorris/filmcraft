@@ -15,6 +15,9 @@ version 2; version 1 projects open with no caption tracks).
   line spacing, and **word highlighting**: with `highlight` on, the word being spoken is drawn in
   `highlight_color` (default yellow), optionally over a `highlight_box_color` box (`highlight_box`),
   word by word as the playhead moves, in the Program monitor and burned in on export.
+  The style last set (`captions.setStyle`, the Text panel's style strip) is remembered in the
+  preferences (`captions.defaultStyle`) and every new caption track starts from it, in any
+  project, so a font and word highlight chosen once carry over (`reset` is remembered too).
 - **Caption**: in/out in exact `Tick`s, text (lines separated by `\n`; `<i>`, `<b>`, `<u>` kept
   as written), optional speaker, and the WebVTT cue id and cue settings, kept for round trips.
   Captions on a track never overlap.

@@ -236,10 +236,14 @@ pub fn commands() -> Vec<CommandSpec> {
                 let name = str_p(p, "name").map(str::to_string).unwrap_or_else(|| format.label().to_string());
                 let lang = str_p(p, "language").unwrap_or("en").to_string();
                 let seq = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+                let style = s.prefs.captions.default_style.clone();
                 let id = s.edit("Add Caption Track", |pr, _| {
                     let id = TrackId(pr.alloc_id());
                     let mut t = CaptionTrack::new(id, name, format);
                     t.language = lang;
+                    if let Some(style) = style {
+                        t.style = style;
+                    }
                     if format == CaptionFormat::Cea608 {
                         t.style.background_color = [0, 0, 0, 255];
                     }
@@ -366,6 +370,13 @@ pub fn commands() -> Vec<CommandSpec> {
                     }
                     Ok(())
                 })?;
+                // the style just set is what the next new track starts from
+                let style = s.active_sequence().and_then(|q| q.caption_track(tid)).map(|t| t.style.clone());
+                if style.is_some() && style != s.prefs.captions.default_style {
+                    let mut prefs = s.prefs.clone();
+                    prefs.captions.default_style = style;
+                    s.set_prefs(prefs).map_err(|e| EngineError::Other(format!("saving preferences: {e}")))?;
+                }
                 Ok(Value::Null)
             },
         ),

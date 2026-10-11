@@ -304,4 +304,12 @@ fn captions_fit_the_tracks_font_size_by_default() {
     s.execute("captions.newTrack", json!({"format": "Subtitle"})).unwrap();
     s.execute("transcript.createCaptions", json!({"track": "C1", "maxChars": 32, "lines": 2})).unwrap();
     assert_eq!(s.active_sequence().unwrap().caption_tracks[0].captions.len(), 2);
+    // a track Create Captions makes itself starts from the last style set, like any new track
+    s.execute("captions.setStyle", json!({"track": "C1", "font": "Bebas Neue", "highlight": true})).unwrap();
+    for id in s.active_sequence().unwrap().caption_tracks.iter().map(|t| t.id.0).collect::<Vec<_>>() {
+        s.execute("captions.deleteTrack", json!({"track": id})).unwrap();
+    }
+    s.execute("transcript.createCaptions", json!({})).unwrap();
+    let t = &s.active_sequence().unwrap().caption_tracks[0];
+    assert!(t.style.font == "Bebas Neue" && t.style.highlight, "{:?}", t.style);
 }

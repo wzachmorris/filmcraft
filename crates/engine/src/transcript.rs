@@ -433,6 +433,7 @@ fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let format = str_p(p, "format").and_then(CaptionFormat::from_name).unwrap_or_default();
     let name = str_p(p, "name").unwrap_or("Transcript").to_string();
     let n = blocks.len();
+    let style = s.prefs.captions.default_style.clone();
     let tid = s.edit_sequence("Create Captions", |q, ctx, st| {
         let captions = tx::blocks_to_captions(&blocks, &words, ctx);
         let tid = match into {
@@ -443,6 +444,9 @@ fn create_captions(s: &mut Session, p: &Value) -> Result<Value> {
             None => {
                 let tid = TrackId(ctx.alloc());
                 let mut t = CaptionTrack::new(tid, name, format);
+                if let Some(style) = style {
+                    t.style = style;
+                }
                 t.captions = captions;
                 q.caption_tracks.insert(0, t);
                 tid
