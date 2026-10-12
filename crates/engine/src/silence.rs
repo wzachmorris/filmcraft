@@ -15,7 +15,7 @@
 //!   Pauses; `scope: "track"` tightens only the analysed clips' own tracks (and sync-locked
 //!   captions), for a voice track that will be cut to afterwards.
 
-use filmcraft_audio_dsp::silence::{Envelope, SilenceOptions, detect_envelope};
+use filmcraft_audio_dsp::silence::{Envelope, SilenceOptions, auto_threshold, detect_envelope};
 use filmcraft_project::{ClipId, Label, Marker, MarkerId, MarkerKind};
 use filmcraft_time::{TICKS_PER_SECOND, Tick, TimeRange};
 use serde_json::{Value, json};
@@ -131,9 +131,17 @@ pub fn analyse(s: &Session, clips: &[ClipId], opts: &SilenceOptions) -> Result<A
     let sr = seq.settings.sample_rate.clamp(1, 384_000);
     let window = ((opts.window_ms.clamp(1.0, 1000.0) / 1000.0) * f64::from(sr)).round().max(1.0) as usize;
     let provider = s.media.provider(s.project.clone(), s.services.clone());
-    let mut pauses = Vec::new();
-    let mut analysed = 0usize;
-    let (mut thr, mut floor, mut speech) = (f64::NAN, f64::NAN, f64::NAN);
+    // 1. one envelope per clip. The threshold is picked once over every clip together: a track
+    // that has already been cut into short all-speech pieces has no quiet stretch inside any one
+    // piece to measure a noise floor from, so a per-clip threshold would be garbage.
+    struct Prep {
+        clip: ClipId,
+        start: Tick,
+        end: Tick,
+        speed: f64,
+        levels: Vec<f32>,
+    }
+    let mut preps = Vec::new();
     for t in &seq.audio_tracks {
         for it in t.items.iter().filter(|i| clips.contains(&i.id) && i.enabled) {
             let Some(src) = filmcraft_render::SourceProvider::source(&provider, it.item) else { continue };
@@ -165,29 +173,54 @@ pub fn analyse(s: &Session, clips: &[ClipId], opts: &SilenceOptions) -> Result<A
                 }
                 pos = pos.saturating_add(n as i64);
             }
-            let levels = env.finish();
-            let r = detect_envelope(&levels, window, sr, opts);
-            analysed += 1;
-            thr = r.threshold_db;
-            floor = r.noise_floor_db;
-            speech = r.speech_db;
-            // media sample offset → sequence time, through the clip's speed
-            let to_seq = |frames: usize| -> Tick {
-                let secs = frames as f64 / f64::from(sr) / speed;
-                it.start + Tick((secs * TICKS_PER_SECOND as f64).round() as i64)
-            };
-            let end = it.start + it.duration;
-            for sp in r.spans {
-                let a = to_seq(sp.start).min(end);
-                let b = to_seq(sp.end).min(end);
-                if b > a {
-                    pauses.push(Pause { clip: it.id, range: TimeRange::from_bounds(a, b) });
-                }
+            preps.push(Prep { clip: it.id, start: it.start, end: it.start + it.duration, speed, levels: env.finish() });
+        }
+    }
+    let all: Vec<f32> = preps.iter().flat_map(|p| p.levels.iter().copied()).collect();
+    let (floor, speech, auto) = auto_threshold(&all);
+    let thr = opts.threshold_db.filter(|t| t.is_finite()).unwrap_or(auto);
+    let fixed = SilenceOptions { threshold_db: Some(thr), ..*opts };
+    // 2. clips that butt against each other on a track are one continuous signal: a pause that
+    // straddles a cut (the tail of one clip and the head of the next) is found whole. Joined
+    // envelopes are detected together, then every span is mapped back through the clip it lands in.
+    preps.sort_by_key(|p| p.start);
+    let join_slack = Tick(((window as f64 / f64::from(sr)) * TICKS_PER_SECOND as f64).round() as i64);
+    let mut groups: Vec<Vec<&Prep>> = Vec::new();
+    for p in &preps {
+        match groups.last_mut() {
+            Some(g) if g.last().is_some_and(|l| (p.start - l.end).0.abs() <= join_slack.0) => g.push(p),
+            _ => groups.push(vec![p]),
+        }
+    }
+    let mut pauses = Vec::new();
+    for g in &groups {
+        let mut levels = Vec::new();
+        let mut offsets = Vec::with_capacity(g.len());
+        for p in g {
+            offsets.push(levels.len());
+            levels.extend_from_slice(&p.levels);
+        }
+        let r = detect_envelope(&levels, window, sr, &fixed);
+        // media frame offset in the joined envelope → the clip it falls in → sequence time
+        let locate = |frames: usize| -> (usize, Tick) {
+            let w = frames as f64 / window as f64;
+            let k = offsets.iter().rposition(|&o| (o as f64) <= w).unwrap_or(0);
+            let p = g[k];
+            let local = (w - offsets[k] as f64) * window as f64;
+            let secs = local / f64::from(sr) / p.speed;
+            (k, (p.start + Tick((secs * TICKS_PER_SECOND as f64).round() as i64)).min(p.end))
+        };
+        for sp in r.spans {
+            let (k, a) = locate(sp.start);
+            let (_, b) = locate(sp.end);
+            if b > a {
+                pauses.push(Pause { clip: g[k].clip, range: TimeRange::from_bounds(a, b) });
             }
         }
     }
     pauses.sort_by_key(|p| p.range.start);
-    Ok(Analysis { pauses, clips: analysed, threshold_db: thr, noise_floor_db: floor, speech_db: speech })
+    let (thr, floor, speech) = if preps.is_empty() { (f64::NAN, f64::NAN, f64::NAN) } else { (thr, floor, speech) };
+    Ok(Analysis { pauses, clips: preps.len(), threshold_db: thr, noise_floor_db: floor, speech_db: speech })
 }
 
 fn db(v: f64) -> Value {

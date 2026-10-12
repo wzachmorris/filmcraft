@@ -154,3 +154,28 @@ fn hostile_parameters_are_errors_not_panics() {
     let mut e = Session::default();
     assert!(e.execute("clip.detectSilence", json!({})).is_err());
 }
+
+#[test]
+fn cuts_in_the_track_do_not_hide_pauses_or_skew_the_threshold() {
+    let (mut s, _clip) = session();
+    // one cut in the middle of the long pause, one inside a word (a short all-speech piece) and
+    // one through the pure-silence tail: pieces that alone have no floor or no speech to measure
+    for t in [4.2, 0.5, 4.8] {
+        s.execute("sequence.addEdit", json!({"seconds": t})).unwrap();
+    }
+    assert_eq!(s.active_sequence().unwrap().audio_tracks[0].items.len(), 4);
+    let r = s.execute("clip.detectSilence", json!({"track": "A1", "markers": false})).unwrap();
+    let pauses = r["pauses"].as_array().unwrap();
+    assert_eq!(pauses.len(), 2, "{r}");
+    assert!((secs(&pauses[0]["start"]) - 1.04).abs() < 0.02, "{r}");
+    assert!((secs(&pauses[0]["end"]) - 1.76).abs() < 0.02, "{r}");
+    // the pause that straddles two cuts comes back whole
+    assert!((secs(&pauses[1]["start"]) - 3.54).abs() < 0.02, "{r}");
+    assert!((secs(&pauses[1]["end"]) - 4.96).abs() < 0.02, "{r}");
+    let thr = r["thresholdDb"].as_f64().unwrap();
+    assert!((-50.0..-30.0).contains(&thr), "one threshold for the whole track: {r}");
+    let r = s.execute("clip.removeSilence", json!({"track": "A1", "keepSeconds": 0.12})).unwrap();
+    assert_eq!(r["removed"], json!(2), "{r}");
+    let r = s.execute("clip.detectSilence", json!({"markers": false})).unwrap();
+    assert_eq!(r["pauses"].as_array().unwrap().len(), 0, "{r}");
+}
