@@ -61,6 +61,8 @@ fn meta(command: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "clip.updateMetadata" => (tl!("Update Metadata"), "updateMetadata", tl!("OK")),
         "clip.automateToSequence" => (tl!("Automate To Sequence"), "automate", tl!("OK")),
         "clip.sceneEditDetection" => (tl!("Scene Edit Detection"), "sceneDetect", tl!("Analyze")),
+        "clip.detectSilence" => (tl!("Detect Silence"), "detectSilence", tl!("Detect")),
+        "clip.removeSilence" => (tl!("Remove Silence"), "removeSilence", tl!("Remove")),
         "sequence.normalizeMixTrack" => (tl!("Normalize Mix Track"), "normalizeMix", tl!("OK")),
         "sequence.simplify" => (tl!("Simplify Sequence"), "simplify", tl!("Simplify")),
         "sequence.transcribe" => (tl!("Transcribe Sequence"), "transcribe", tl!("Transcribe")),
@@ -85,6 +87,8 @@ fn dialog_command(id: &str) -> Option<&'static str> {
         "clip.updateMetadata" => "clip.updateMetadata",
         "clip.automateToSequence" => "clip.automateToSequence",
         "clip.sceneEditDetection" => "clip.sceneEditDetection",
+        "clip.detectSilence" => "clip.detectSilence",
+        "clip.removeSilence" => "clip.removeSilence",
         "sequence.normalizeMixTrack" => "sequence.normalizeMixTrack",
         "sequence.simplify" => "sequence.simplify",
         // Sequence ▸ Transcript ▸ Transcribe… and the Text panel's Transcribe button open the same
@@ -325,6 +329,10 @@ fn defaults(app: &mut FilmcraftApp, cmd: &str, id: &str) -> Result<(Value, Value
             json!({"sequence": s.active_sequence().map(|_| s.state.active_sequence.and_then(|q| s.project.item(q)).map(|i| i.name.clone()).unwrap_or_default())}),
         ),
         "clip.sceneEditDetection" => (json!({"applyCuts": true, "createSubclips": false, "generateMarkers": false, "sensitivity": 50.0}), Value::Null),
+        "clip.detectSilence" => (json!({"auto": true, "thresholdDb": -45.0, "minSeconds": 0.3, "padSeconds": 0.04, "markers": true}), Value::Null),
+        "clip.removeSilence" => {
+            (json!({"auto": true, "thresholdDb": -45.0, "minSeconds": 0.3, "keepSeconds": 0.12, "padSeconds": 0.04, "scope": "sequence"}), Value::Null)
+        }
         "sequence.normalizeMixTrack" => (json!({"db": 0.0}), Value::Null),
         "sequence.simplify" => {
             let name = s.state.active_sequence.and_then(|q| s.project.item(q)).map(|i| tlf!("{name} (Simplified)", name = i.name)).unwrap_or_default();
@@ -718,6 +726,31 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
                     p["sensitivity"] = json!(v);
                 });
             }
+            "clip.detectSilence" | "clip.removeSilence" => {
+                ui.label(tl!("Pauses are measured from the sound of the selected audio clips (every audio clip when none is selected)."));
+                check(ui, &mut elems, pre, p, "auto", tl!("Threshold from the recording (noise floor and speech level)"));
+                if p["auto"].as_bool() != Some(true) {
+                    number(ui, &mut elems, pre, p, "thresholdDb", tl!("Silence below:"), -120.0..=0.0, " dB");
+                }
+                number(ui, &mut elems, pre, p, "minSeconds", tl!("Shortest pause:"), 0.05..=60.0, " s");
+                if d.command == "clip.removeSilence" {
+                    number(ui, &mut elems, pre, p, "keepSeconds", tl!("Air to keep in each pause:"), 0.0..=10.0, " s");
+                }
+                number(ui, &mut elems, pre, p, "padSeconds", tl!("Pad around words:"), 0.0..=1.0, " s");
+                if d.command == "clip.removeSilence" {
+                    radios(
+                        ui,
+                        &mut elems,
+                        pre,
+                        p,
+                        "scope",
+                        tl!("Close the time on:"),
+                        &[("sequence", tl!("Every track (keeps sync)")), ("track", tl!("Only the audio clips' tracks and their captions"))],
+                    );
+                } else {
+                    check(ui, &mut elems, pre, p, "markers", tl!("Add a range marker on each pause"));
+                }
+            }
             "sequence.normalizeMixTrack" => number(ui, &mut elems, pre, p, "db", tl!("Normalize Mix Track to:"), -96.0..=24.0, " dB"),
             "sequence.simplify" => {
                 text(ui, &mut elems, pre, p, "name", tl!("Sequence Name:"), 240.0);
@@ -888,6 +921,28 @@ fn run(app: &mut FilmcraftApp, d: &ClipDialogDraft) -> Result<Option<String>, St
         "clip.sceneEditDetection" => {
             s.execute(&d.command, p.clone()).map_err(|e| e.to_string())?;
             app.ui.status = tl!("Scene Edit Detection: analysing in the background (see Progress)").into();
+            Ok(None)
+        }
+        cmd @ ("clip.detectSilence" | "clip.removeSilence") => {
+            let mut q = p.clone();
+            if let Some(m) = q.as_object_mut()
+                && m.remove("auto").and_then(|a| a.as_bool()) != Some(false)
+            {
+                m.remove("thresholdDb");
+            }
+            let r = s.execute(cmd, q).map_err(|e| e.to_string())?;
+            let n = r["pauses"].as_array().map_or(0, Vec::len);
+            let thr = r["thresholdDb"].as_f64().unwrap_or(f64::NAN);
+            app.ui.status = if cmd == "clip.removeSilence" {
+                tlf!(
+                    "Remove Silence: {n} pauses, {secs:.1} s removed (threshold {thr:.0} dB)",
+                    n = r["removed"].as_u64().unwrap_or(0),
+                    secs = r["removedSeconds"].as_f64().unwrap_or(0.0),
+                    thr = thr
+                )
+            } else {
+                tlf!("Detect Silence: {n} pauses, {secs:.1} s (threshold {thr:.0} dB)", n = n, secs = r["totalSeconds"].as_f64().unwrap_or(0.0), thr = thr)
+            };
             Ok(None)
         }
         cmd => {

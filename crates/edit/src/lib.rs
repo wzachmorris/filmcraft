@@ -339,6 +339,25 @@ pub fn extract(seq: &mut Sequence, tracks: &[TrackId], range: TimeRange, ctx: &m
     removed
 }
 
+/// [`extract`] on exactly `tracks` (and the unlocked caption tracks that follow them with sync
+/// lock): the other tracks keep their time even when they are sync-locked. Tightening one voice
+/// track without touching the picture.
+pub fn extract_only(seq: &mut Sequence, tracks: &[TrackId], range: TimeRange, ctx: &mut EditCtx) -> Vec<ClipId> {
+    let mut links = HashMap::new();
+    let mut removed = Vec::new();
+    for tr in seq.all_tracks_mut() {
+        if tr.locked || !tracks.contains(&tr.id) {
+            continue;
+        }
+        removed.extend(clear_track_range(tr, range, ctx, &mut links));
+        shift_track_from(tr, range.end(), -range.duration);
+    }
+    for ct in seq.caption_tracks.iter_mut().filter(|c| !c.locked && c.sync_lock) {
+        captions::extract_range(ct, range);
+    }
+    removed
+}
+
 /// Delete track items (leaving gaps).
 pub fn delete_items(seq: &mut Sequence, items: &[ClipId]) -> usize {
     let mut n = 0;
