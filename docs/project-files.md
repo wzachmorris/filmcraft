@@ -155,9 +155,11 @@ Premiere's auto-save can lose up to one interval of work. FilmCraft also keeps a
   over the original file. The recovered state goes into the new session's own journal before the old
   journal is deleted.
 - A normal quit with nothing unsaved removes the session directory. Quitting with unsaved changes
-  keeps the snapshot, marked `cleanExit`, and FilmCraft offers it on the next launch ("FilmCraft was
-  closed while … had unsaved changes"). There is no "Save changes?" prompt on quit yet, so this
-  keeps the work.
+  (Quit, Cmd+Q or the window's close button) first asks *"Save changes to 'X' before closing?"*
+  with **Cancel**, **Don't Save** and **Save** (Save on a never-saved project opens the Save dialog);
+  Don't Save discards the changes and their snapshot. A quit that does not ask (the control
+  channel's `app.quit`, the OS ending the session) keeps the snapshot, marked `cleanExit`, and FilmCraft offers it on the next launch ("FilmCraft was
+  closed while … had unsaved changes").
 
 Desktop flags: `--recover` recovers the newest candidate without asking. `--no-recover` starts
 without asking; the changes stay available through File ▸ Recover Unsaved Changes…. `--data-dir
@@ -224,7 +226,7 @@ opens the dialog on a page.
 | Auto Save | the auto-save ring and the crash-recovery journal |
 | Color | stored only (display colour management, EDR monitoring, HDR graphics white) |
 | Graphics | new text layers: smart quotes, ligatures, default font |
-| Labels | the 16 label names and colours (timeline, Project panel, Edit ▸ Label), label defaults for imported movies / video / audio / stills and new sequences |
+| Labels | the 16 label names and colours (timeline, Project panel, Edit ▸ Label), label defaults for imported movies / video / audio / stills and new sequences, Label Color Presets: JSON files (`{"name", "labels": [16 × {"name", "color": "#rrggbb"}]}`) in `<data dir>/Label Presets`, built in: "Default" (the labels FilmCraft ships with), "Bright" (16 saturated hues) and "Roles" (B-Roll, Footage, Dialogue… named so the label defaults land on matching roles) (`labels.presets`, `labels.importPreset {path}`, `labels.exportPreset {path}`, `labels.deletePreset {name}`; `labels.preset` is the selected one) |
 | Media | Indeterminate Media Timebase (frame rate of stills), Default Media Scaling (Scale to / Set to frame size when a clip of another size is edited in), Enable proxies |
 | Media Analysis & Transcription | auto-transcribe imported clips (scope "all imported"), speech model, default language / auto-detect, speaker labelling (defaults of `transcript.generate`) |
 | Captions | stored only: the caption track style last set (`captions.setStyle`), which new caption tracks start from (see docs/captions.md) |
@@ -363,6 +365,11 @@ destination?, preset?}` (Project Settings ▸ Ingest) acts on every `file.import
   clip to the result when it is done;
 - **createProxies** makes proxies in the background and attaches them;
 - **copyAndCreateProxies** does both.
+
+Copied files keep their names when available; collisions receive a numbered suffix before the
+extension (`A001 2.mov`) and never replace an existing file. Transcodes reserve distinct output
+names for every clip in the import batch. Copies keep their source fingerprint, and each proxy
+stays attached to its corresponding take.
 
 `file.import` reports this under `ingest`.
 

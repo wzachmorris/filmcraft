@@ -225,6 +225,7 @@ fn nudge_time(s: &mut Session, frames: i64) -> Result<Value> {
 fn nudge_track(s: &mut Session, up: bool) -> Result<Value> {
     let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
     let mut moves = Vec::new();
+    let mut blocked = 0usize;
     for c in &s.state.selection {
         let Some((tid, it)) = seq.find_item(*c) else { continue };
         let Some(tr) = seq.track(tid) else { continue };
@@ -234,11 +235,17 @@ fn nudge_track(s: &mut Session, up: bool) -> Result<Value> {
             (TrackKind::Video, true) | (TrackKind::Audio, false) => 1,
             _ => -1,
         };
-        let dest = usize::try_from(idx + step).ok().and_then(|i| list.get(i)).ok_or_else(|| EngineError::Other("no track to move to".into()))?;
+        // a clip already on the outermost track stays put (a linked video+audio selection must not
+        // fail because its audio has nowhere to go)
+        let Some(dest) = usize::try_from(idx + step).ok().and_then(|i| list.get(i)) else {
+            blocked += 1;
+            continue;
+        };
         moves.push((*c, dest.id, it.start));
     }
     if moves.is_empty() {
-        return Err(EngineError::Other("no clips selected".into()));
+        let why = if blocked > 0 { "no track to move to" } else { "no clips selected" };
+        return Err(EngineError::Other(why.into()));
     }
     s.edit_sequence("Nudge", |q, ctx, _| Ok(edit::move_items(q, &moves, false, ctx)?))?;
     Ok(json!({"moved": moves.len()}))
@@ -631,13 +638,20 @@ fn export_frame(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let provider = s.media.full_res_provider(s.project.clone(), s.services.clone());
+    // On the web a frame can still be decoding (WebCodecs) or its bytes loading (Blob reads): the
+    // render then leaves that clip out, so saving it would pass a blank or partial picture off as
+    // the requested frame (#228). Report it instead and write nothing; a later call succeeds.
+    let _ = filmcraft_media::pending::take();
     let img = if target.source {
         filmcraft_render::render_item(&s.project, target.item, target.time, 1.0, &provider)
-            .ok_or_else(|| bad("file.exportFrame", "cannot decode the Source video frame"))?
     } else {
         let opts = filmcraft_render::RenderOptions { scale: 1.0, captions: true, ..Default::default() };
-        filmcraft_render::render_sequence(&s.project, target.item, target.time, opts, &provider)
+        Some(filmcraft_render::render_sequence(&s.project, target.item, target.time, opts, &provider))
     };
+    if filmcraft_media::pending::take() {
+        return Err(EngineError::Other("the frame is still loading; export it again in a moment".into()));
+    }
+    let img = img.ok_or_else(|| bad("file.exportFrame", "cannot decode the Source video frame"))?;
     let (w, h) = (
         u32::try_from(img.w).map_err(|_| bad("file.exportFrame", "image width exceeds limits"))?,
         u32::try_from(img.h).map_err(|_| bad("file.exportFrame", "image height exceeds limits"))?,

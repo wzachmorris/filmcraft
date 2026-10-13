@@ -85,7 +85,7 @@ on (Export ▸ Captions ▸ Export Options changes it), and a format switch keep
 ## Timeline and Text panel
 
 - Caption rows: header with `C1…` badge, lock, output eye, name and format; caption blocks in
-  violet showing their text. Click selects (⌘/⇧ adds), drag moves, edge drag trims, double-click
+  violet showing their text (Arabic and Hebrew in reading order from the block's right edge). Click selects (⌘/⇧ adds), drag moves, edge drag trims, double-click
   opens the Text panel. Automation ids: `timeline.caption.<id>`,
   `timeline.captionTrack.C1[.locked|.enabled]`.
 - **Word times** (`Caption::words`, schema v16): captions made from a transcript
@@ -96,7 +96,8 @@ on (Export ▸ Captions ▸ Export Options changes it), and a format switch keep
   Caption exports (SRT, WebVTT, …) ignore the times.
 - **Text panel ▸ Captions**: search, track picker (also creates tracks of each format), add /
   split / merge / delete / export buttons, the list of segments with editable in/out timecodes
-  and text (committed when the field loses focus), and the track style strip (size, colour, outline width and colour, box, word highlight,
+  and text (committed when the field loses focus; Arabic and Hebrew show in reading order and are
+  edited in logical order while the field has focus), and the track style strip (size, colour, outline width and colour, box, word highlight,
   alignment, position). Automation ids: `text.tab.Captions`, `text.captions.add|split|merge|delete|export|search|track`,
   `text.captions.<id>.in|out|text|goto|row`, `text.captions.style.*`.
 
